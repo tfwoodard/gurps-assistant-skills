@@ -27,6 +27,9 @@ jobs:
           if git diff --quiet "$base"...HEAD -- skills shared; then
             echo "no skill changes"; exit 0
           fi
+          if ! git cat-file -e "$base":.claude-plugin/plugin.json 2>/dev/null; then
+            echo "the base has no plugin.json yet: nothing to compare"; exit 0
+          fi
           old=$(git show "$base":.claude-plugin/plugin.json | python3 -c "import json,sys;print(json.load(sys.stdin)['version'])")
           new=$(python3 -c "import json;print(json.load(open('.claude-plugin/plugin.json'))['version'])")
           if [ "$old" = "$new" ]; then
