@@ -90,7 +90,8 @@ from the WFRP one.
   - moving a library file to the Drive trash once its replacement is written
     and its size verified;
   - deleting the import's own scratch files (`import_journal.py clean`);
-  - pushing a feature branch and opening a pull request (never merging);
+  - pushing a feature branch and opening a pull request (never merging
+    unasked; when asked to merge, delete the branch as well);
   - copying packaged skills to the library's skill folders.
 
 ## Lessons carried over from the DnD and WFRP Assistants
@@ -129,8 +130,13 @@ These cost real time there; don't relearn them.
   GCA calculates, from data files (docs/adr/0006). Don't write code that works
   out a cost or a level.
 - **Show the Librarian a reading before it is written.** A generated
-  definition, a table, a link that isn't an exact match: each is shown beside
-  the text it reads and written only once confirmed.
+  definition, a link that isn't an exact match: each is shown beside the text
+  it reads and written only once confirmed.
+- **Tables are verified by the tool, not by the Librarian** (decided
+  2026-11-22: there are too many to confirm by hand). A table reader checks
+  every table it reads and refuses one that fails. The Librarian sees the
+  first three a reader produces, then only a failure that needs the reader
+  changed. Put the effort into the checks.
 
 ## What is and isn't built
 
@@ -139,9 +145,10 @@ text helpers, renderer, coverage and name checks, merge, journal, entry editor
 (all from WFRP); the library reader, lookup and excerpt tools; the data file
 reader and writer (`gdf.py`, run against every data file on this computer) and
 `add_data_file.py`; the character file reader and sheet (`gca5.py`); the trait
-converter (`convert_traits.py`).
+converter (`convert_traits.py`), which reads and checks the tables set in a
+trait's text.
 
-Not built: tables set inside a trait's text; converters for skills, spells,
+Not built: converters for skills, spells,
 templates, equipment tables, rules prose and creatures; linking entries to
 definitions; writing to character files. `skills/gurps-import/SKILL.md` and
 `skills/gurps-character-sheet/references/character-files.md` say what each

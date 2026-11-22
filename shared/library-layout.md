@@ -416,8 +416,16 @@ truncated text, every word of the chapter in an entry or the left-out list.
 Report every failure with its chapter and section, and set the chapter's
 status to `problems`.
 
-**Tables** are the exception: show each table to the importer and write it only
-after they confirm it, because characters and play depend on its numbers.
+**Tables** are checked by the tool that reads them, not one by one by a
+person: characters and play depend on their numbers, and a book has too many
+to show each. A table is written only when it passes every check its reader
+makes (each row has a cell in each column, the header names each column, each
+column's cells line up on the page). The importer is shown the first three
+tables a reader produces for a kind of table, to confirm the reader reads them
+as the page prints them; after that, only a table that fails a check. A failed
+table is never written on a guess: the reader is corrected, with a test, and
+the chapter converted again. A table the tools cannot read at all (drawn as a
+picture, a flowchart) is transcribed by hand and shown.
 
 ### Cross-references
 

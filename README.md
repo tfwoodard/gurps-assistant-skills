@@ -150,8 +150,9 @@ it through the Claude desktop app.
 4. Ask *"what's left to import?"* at any time.
 
 Entries keep the source's exact wording and are cited by chapter, section and
-page, e.g. *(B, ch. 2 › Combat Reflexes, p. 43)*. Tables are shown to you for
-confirmation before they're written.
+page, e.g. *(B, ch. 2 › Combat Reflexes, p. 43)*. Tables are checked by the
+tool that reads them; you are shown the first few, and after that only one that
+fails a check.
 
 **Homebrew** lives in a homebrew document: a Markdown file per library or
 campaign, imported a chapter at a time
