@@ -233,6 +233,7 @@ skills/<name>/         SKILL.md + references/ and scripts/ (some are synced copi
 skills/gurps-import/scripts/gdf.py             GCA data file -> JSON and index; entries' definitions -> a data file
 skills/gurps-import/scripts/add_data_file.py   add a GCA data file to the library, or read it again after it changed
 skills/gurps-import/scripts/convert_traits.py  trait write-ups (advantages, modifiers...) -> entries
+skills/gurps-import/scripts/book_words.py      the words a book prints whole, to settle words broken at a line end
 skills/gurps-import/scripts/open_page.py       open a source's PDF at a printed page, to check an import against it
 skills/gurps-import/scripts/pdf_outline.py     PDF bookmarks -> chapter list with printed pages
 skills/gurps-import/scripts/pdf_layout.py      PDF pages -> lines (by baseline and column) with style, boxes
@@ -241,6 +242,7 @@ skills/gurps-import/scripts/render_entry.py    entry .json -> Markdown
 skills/gurps-import/scripts/check_coverage.py  check converted entries lost no words of the pages
 skills/gurps-import/scripts/check_names.py     check new entries sharing a name have a relation
 skills/gurps-import/scripts/edit_entry.py      correct an entry's fields or relations in place
+skills/gurps-import/scripts/write_chapter.py   write a converted chapter into a library folder, once it passes its checks
 skills/gurps-import/scripts/merge_import.py    merge index records, log, chapter status
 skills/gurps-import/scripts/import_journal.py  progress journal for resuming an import
 skills/gurps-import/scripts/print_upload.py    print files for connector uploads

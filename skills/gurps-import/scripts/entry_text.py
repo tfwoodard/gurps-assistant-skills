@@ -100,22 +100,59 @@ def vocabulary(lines):
     """Every word the lines print whole (not broken at a line end), lower-cased: the evidence for
     whether a word broken across lines is hyphenated or only split."""
     vocab = set()
+    broken = False                    # the line before ended in a hyphen
     for l in lines:
         words = l['text'].split()
         for i, w in enumerate(words):
             if i == len(words) - 1 and w.endswith('-'):
-                continue
+                continue              # the first half of a broken word
+            if i == 0 and broken:
+                continue              # and its second half, which is no word either
             vocab.add(re.sub(r'^[^\w]+|[^\w-]+$', '', w).lower())
+        broken = bool(words) and words[-1].endswith('-')
     return vocab
+
+
+SUFFIXES = ('’s', "'s", 'ing', 'ed', 'es', 'ly', 'er', 'ers', 's', 'd')
+
+
+def known(word, vocab):
+    """True when the book prints the word, or the word without one common ending ("reporting"
+    when it prints "report"): a word seen only once, broken at a line's end, still has its kin
+    elsewhere."""
+    if word in vocab:
+        return True
+    for x in SUFFIXES:
+        stem = word[:-len(x)]
+        if word.endswith(x) and len(stem) >= 3:
+            # "reporting" from "report"; "tuning" from "tune"
+            if (len(stem) >= 4 and stem in vocab) or (x in ('ing', 'ed', 'er', 'ers') and stem + 'e' in vocab):
+                return True
+    return False
+
+
+# endings that are words by themselves but only end a word when they follow a line-end hyphen
+ENDINGS = {'less', 'lessly', 'lessness', 'ness', 'ment', 'ments', 'able', 'ably', 'ful', 'fully', 'ward', 'wards',
+           'ship', 'hood', 'like', 'wise', 'some', 'ally', 'ing', 'ings', 'ion', 'ions'}
 
 
 def join_lines(parts, report, where, vocab=None):
     """Join a run of line texts into one string. A line ending in a hyphen joins the next with no
-    space. With `vocab` (vocabulary()), the hyphen is dropped when the book prints the joined word
-    whole elsewhere and never hyphenated (a word split only to fit the line), and kept when it
-    prints the hyphenated form or neither; each case is reported: `dehyphenated` for the ones
-    dropped (check_coverage.py credits them), a question for the ones kept. A styled run that
-    carries on over the line break is marked once."""
+    space. With `vocab` (the words the book prints whole: vocabulary(), book_words.py) each such
+    hyphen is settled, and every decision is in the report:
+
+      * a figure or an abbreviation beside it ("12-" / "hour", "HT-" / "5"): kept (`hyphens_kept`);
+      * the book prints the hyphenated form elsewhere and not the joined one: kept (`hyphens_kept`);
+      * it prints the joined word (or its kin: known()) and not the hyphenated: dropped
+        (`dehyphenated`, which check_coverage.py credits);
+      * it prints neither, and a half is no word by itself ("cer-" / "tificate"): dropped
+        (`dehyphenated`, with why);
+      * it prints neither, and the second half is only an ending ("noise-" / "lessly"): dropped;
+      * it prints both, or neither and both halves are words ("near-" / "perfect"): kept as a
+        compound (`hyphens_kept`, with why). A converter's plan lists the few of these that
+        should be one word.
+
+    A styled run that carries on over the line break is marked once."""
     out = ''
     for p in parts:
         end = re.search(r'-(\*{0,3})$', out)
@@ -128,14 +165,52 @@ def join_lines(parts, report, where, vocab=None):
             head = re.search(r'([\w’\']+)-$', out)
             tail = re.match(r'^\*{0,3}([\w’\']+)', p)
             if vocab is not None and head and tail:
-                whole = (head.group(1) + tail.group(1)).lower()
-                hyph = (head.group(1) + '-' + tail.group(1)).lower()
-                if whole in vocab and hyph not in vocab:
-                    report.setdefault('dehyphenated', []).append(
-                        {'entry': where, 'from': head.group(1) + '-' + tail.group(1), 'to': head.group(1) + tail.group(1)})
+                h, t = head.group(1), tail.group(1)
+                whole, hyph = (h + t).lower(), (h + '-' + t).lower()
+                shown = out[-20:] + p[:20]
+                if re.search(r'\d', h + t) or (h.isupper() and len(h) > 1):
+                    # a figure or an abbreviation beside the hyphen: a range, "12-hour", "HT-5"
+                    report.setdefault('hyphens_kept', []).append(
+                        {'entry': where, 'text': shown, 'why': 'a figure or an abbreviation'})
+                    out += p
+                    continue
+                whole_known, hyph_known = known(whole, vocab), known(hyph, vocab)
+                if hyph_known and not whole_known:
+                    report.setdefault('hyphens_kept', []).append(
+                        {'entry': where, 'text': shown, 'why': 'the book prints it hyphenated elsewhere'})
+                    out += p
+                    continue
+                if whole_known and not hyph_known:
+                    report.setdefault('dehyphenated', []).append({'entry': where, 'from': h + '-' + t, 'to': h + t})
                     out = out[:-1] + p
                     continue
-                kind = 'hyphen-join' if hyph in vocab else 'hyphen-unresolved'
+                if not whole_known and not hyph_known:
+                    halves = known(h.lower(), vocab) and known(t.lower(), vocab)
+                    if not halves or t.lower() in ENDINGS:
+                        # Neither form is printed elsewhere, and a half is no word by itself
+                        # ("cer-" / "tificate") or the second is only an ending ("noise-" /
+                        # "lessly"): the hyphen only marks the break.
+                        why = 'a half is not a word by itself' if not halves else 'the second half is only an ending'
+                        report.setdefault('dehyphenated', []).append(
+                            {'entry': where, 'from': h + '-' + t, 'to': h + t, 'why': why})
+                        out = out[:-1] + p
+                        continue
+                # Both forms are printed elsewhere, or neither is and both halves are words
+                # ("near-" / "perfect", "mail-" / "room"): kept hyphenated, as a compound. This is
+                # the one case decided without evidence from the book; the plan's `whole_words`
+                # joins the ones that should be one word.
+                report.setdefault('hyphens_kept', []).append(
+                    {'entry': where, 'text': shown, 'why': 'the book prints both forms' if hyph_known else
+                     'both halves are words, and the book prints neither form elsewhere'})
+                out += p
+                continue
+            elif vocab is not None and re.search(r'\s-$', out):
+                # A dash standing by itself at the line's end ("roll vs. IQ -" / "Complexity") is a
+                # minus sign or a dash between words, not a broken word: the next word follows it.
+                report.setdefault('hyphens_kept', []).append(
+                    {'entry': where, 'text': out[-20:] + ' ' + p[:20], 'why': 'a dash standing by itself, not a broken word'})
+                out += ' ' + p
+                continue
             else:
                 kind = 'hyphen-join'
             report['questions'].append({'entry': where, 'kind': kind, 'text': out[-20:] + p[:20]})
