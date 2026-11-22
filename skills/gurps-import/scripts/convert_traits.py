@@ -294,14 +294,26 @@ def convert_chapter(layout, plan, taken=None):
 
     # --- slugs, the plan's own notes on entries, names shared with other sources --------------
     seen = {}
+    kinds = {}
     out = []
     for category, e in entries:
         ref = f'{category}/{e["slug"]}'
+        if ref in seen and e['fields'].get('kind') and kinds[ref] and e['fields']['kind'] != kinds[ref]:
+            # The book gives two different traits one name and tells them apart by their kind (an
+            # enhancement and a limitation both called Armor Divisor), as the data files do: both
+            # keep the name, the later takes its kind in its slug, and each is marked distinct.
+            first = ref
+            e['slug'] = f'{e["slug"]}-{slugify(e["fields"]["kind"])}'
+            ref = f'{category}/{e["slug"]}'
+            e.setdefault('relations', []).append({'role': 'distinct-from', 'to': first})
+            report['same_name'].append({'entry': ref, 'same_name_as': first,
+                                        'told_apart_by': f'kind: {e["fields"]["kind"]} / {kinds[first]}'})
         if ref in seen:
             report['errors'].append(f'{ref}: two entries of this chapter take this slug (p{seen[ref]} and p{e["page"]}); '
                                     f'give one a `slug` or `name` in the plan\'s entries')
             continue
         seen[ref] = e['page']
+        kinds[ref] = e['fields'].get('kind')
         ep = plan.get('entries', {}).get(ref, {})
         e['fields'].update(ep.get('fields', {}))
         if ep.get('relations'):

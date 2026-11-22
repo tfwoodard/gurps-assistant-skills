@@ -199,6 +199,26 @@ class ConvertTest(unittest.TestCase):
         _, report = convert_traits.convert_chapter(chapter(), plan)
         self.assertTrue(any('advantages/tide-sense: two entries of this chapter take this slug' in e for e in report['errors']))
 
+    def test_one_name_for_an_enhancement_and_a_limitation_is_kept_and_told_apart_by_kind(self):
+        plan = json.loads(json.dumps(PLAN))
+        plan['rename'] = []
+        plan['sections'].insert(1, {'heading': 'Marsh Gifts', 'page': 10, 'traits': {'category': 'modifiers', 'kind': 'enhancement'}})
+        doc = chapter()
+        i = next(k for k, l in enumerate(doc['lines']) if l['text'] == 'GIFT LIST')
+        extra = Page().at(y=doc['lines'][i - 1]['baseline'])
+        extra.name('Tide Sense')
+        extra.cost('+10%')
+        extra.para('Works at any tide.')
+        doc['lines'][i:i] = extra.lines
+        entries, report = convert_traits.convert_chapter(doc, plan)
+        self.assertEqual(report['errors'], [])
+        mods = {e['slug']: e for c, e in entries if c == 'modifiers' and e['name'] == 'Tide Sense'}
+        self.assertEqual(sorted(mods), ['tide-sense', 'tide-sense-limitation'])
+        self.assertEqual(mods['tide-sense']['fields']['kind'], 'enhancement')
+        self.assertEqual(mods['tide-sense-limitation']['relations'], [{'role': 'distinct-from', 'to': 'modifiers/tide-sense'}])
+        self.assertEqual(report['same_name'], [{'entry': 'modifiers/tide-sense-limitation', 'same_name_as': 'modifiers/tide-sense',
+                                                'told_apart_by': 'kind: limitation / enhancement'}])
+
     def test_a_name_another_source_holds_is_a_version_of_it(self):
         entries, report = convert_traits.convert_chapter(chapter(), json.loads(json.dumps(PLAN)),
                                                          {'advantages': {'tide-sense': 'XX'}})

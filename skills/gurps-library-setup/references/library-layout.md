@@ -319,7 +319,13 @@ A slug is the tools' own handle: it keeps files apart, and no player or GM ever
 sees it. What people see is the `name`. Two entries of one name are usually
 meant to be read together (a supplement's longer write-up of a skill, a
 reprint), and then a suffix on the slug is all they need. Two different things
-of one name in one category get different names, and the slug follows the name.
+of one name in one category must be something a reader can tell apart. Where
+the book itself gives both the one name and tells them apart by their `kind`
+(the enhancement *Armor Divisor* and the limitation *Armor Divisor*, as the
+data files also have them), both keep the book's name, the later one's slug
+takes its kind (`armor-divisor-limitation`), each is `distinct-from` the other,
+and whoever shows one says its kind. Otherwise the later one gets a different
+name, and the slug follows the name.
 
 ### `_import-log.json`
 
