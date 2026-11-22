@@ -296,9 +296,19 @@ wording, with bold and italic as Markdown marks:
 | `paragraph` | `text` |
 | `list` | `ordered`, `items` (strings, or `{"text", "items"}` for an item with a sublist) |
 | `fields` | `title`, `items`: `[{"label", "text"}]` (a spell's "Duration: 1 minute" lines, a skill's "Defaults:" line) |
-| `table` | `title`, `columns`, `rows` (cells as printed), `groups` (`{"before": row, "text"}` for rows that head the rows below), `footnotes`, and `data` |
+| `table` | `title`, `columns`, `rows` (cells as printed), `groups` (`{"before": row, "text"}` for rows that head the rows below), `footnotes`, `data`, and `read_with` for a table set in an entry's text (below) |
 | `sidebar` | `title`, `content` (blocks) |
 | `profile` | `name`, `characteristics` (the stat line, in the printed order), `lines` (`[{"label": "Traits", "text": "…"}]`, as printed) — a creature's or NPC's stat block |
+
+A table set inside an entry's text is not the whole of what the book says
+about it. The paragraph before it says what it is a table of, and the one
+after it often carries it on past its last row ("further levels continue to
+double"), says what to do between two rows ("use the higher"), or closes it
+("this table is not open-ended"). Those paragraphs stay where the book prints
+them, as the blocks on either side, and the table's `read_with` (`"before"`,
+`"after"`, or both) says which are there. Whoever shows a table, quotes it, or
+works anything out from its `data` takes those paragraphs with it: a table's
+rows alone are never the rule.
 
 A table's `data` has one object per row, keyed by its column headers in words
 (`"weapon"`, `"roll"`). "—" is `null`; plain, "+N" and "−N" numbers are
@@ -416,8 +426,16 @@ truncated text, every word of the chapter in an entry or the left-out list.
 Report every failure with its chapter and section, and set the chapter's
 status to `problems`.
 
-**Tables** are the exception: show each table to the importer and write it only
-after they confirm it, because characters and play depend on its numbers.
+**Tables** are checked by the tool that reads them, not one by one by a
+person: characters and play depend on their numbers, and a book has too many
+to show each. A table is written only when it passes every check its reader
+makes (each row has a cell in each column, the header names each column, each
+column's cells line up on the page). The importer is shown the first three
+tables a reader produces for a kind of table, to confirm the reader reads them
+as the page prints them; after that, only a table that fails a check. A failed
+table is never written on a guess: the reader is corrected, with a test, and
+the chapter converted again. A table the tools cannot read at all (drawn as a
+picture, a flowchart) is transcribed by hand and shown.
 
 ### Cross-references
 

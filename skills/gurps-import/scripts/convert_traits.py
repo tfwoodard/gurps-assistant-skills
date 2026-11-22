@@ -57,7 +57,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from entry_text import (blocks_from_lines, fix_case, mark_paragraphs, marked, plain, slugify,  # noqa: E402
-                        vocabulary)
+                        vocabulary, with_text_tables)
 from render_entry import render  # noqa: E402
 
 PRINTED_FIELDS = ('cost', 'types', 'see')        # fields that hold words printed on the page
@@ -110,7 +110,7 @@ def table_like(l):
 
 def convert_chapter(layout, plan, taken=None):
     taken = taken or {}
-    report = {'errors': [], 'questions': [], 'left_out': [], 'dehyphenated': [], 'table_like': [],
+    report = {'errors': [], 'questions': [], 'left_out': [], 'dehyphenated': [], 'table_like': [], 'tables': [],
               'printed_fields': list(PRINTED_FIELDS), 'same_name': [], 'counts': {}}
     icons = plan.get('icons', [])
     name_size, cost_size = plan['name_size'], plan['cost_size']
@@ -144,12 +144,20 @@ def convert_chapter(layout, plan, taken=None):
 
     def add(category, name, first, section, fields, content_lines, level, base_size, extra=None):
         where = f'{category}/{slugify(name)}'
+        content_lines = with_text_tables(content_lines, report, where)
         blocks = blocks_from_lines(content_lines, report, where, vocab)
+        for k, b in enumerate(blocks):
+            # A table set in the text is read with the text round it: the paragraph before says
+            # what it is a table of, the one after often carries it on ("further levels continue
+            # to double") or closes it ("this table is not open-ended"). Say which are there.
+            if b['type'] == 'table':
+                b['read_with'] = [side for side, j in (('before', k - 1), ('after', k + 1))
+                                  if 0 <= j < len(blocks) and blocks[j]['type'] == 'paragraph']
         entry = {'slug': slugify(name), 'name': name, 'source': source, 'chapter': chapter, 'section': section,
                  'page': first['page'], 'fields': fields, 'level': level, 'content': blocks}
         entry.update(extra or {})
         for l in content_lines:
-            if not l.get('heading') and table_like(l):
+            if not l.get('heading') and not l.get('block') and table_like(l):
                 report['table_like'].append({'entry': where, 'page': l['page'], 'text': l['text']})
         entries.append((category, entry))
         return entry

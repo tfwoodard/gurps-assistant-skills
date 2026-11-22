@@ -114,7 +114,7 @@ PDF or anything read from it into the repo.
 
    | Kind | Script | Plan says |
    |---|---|---|
-   | Trait write-ups (advantages, disadvantages, perks, quirks, enhancements and limitations): a name with its type icons, a cost line under it, then text | `convert_traits.py` | the type sizes of a trait's name and of its cost line (`name_size`, `cost_size`); the icon words; the `sections` that are lists of traits, by heading and page, with their category and kind (every other section becomes a `rules` entry, and so does each box); `intro` (a name for text before the first heading); `boxes` (`leave_out` with the reason, or `adds_to` an entry, or a `name`); `rename` for two different traits of one name in one category; `not_traits` and `leave_out_lines` for name-sized lines that aren't traits; `entries` for an entry's relations, extra fields or audience. Traits are found by their headings, not listed: a name with no cost line under it is an error. Read the pages with `--boxes`, the book's type icons as words (`--icon-fonts`, `--icon-text FONT:GLYPH=[word]`, `--icons-alone`) and its pull quotes set aside (`--aside-fonts FONT@SIZE`); the plan's `layout` records the options used. Check the layout's `gutter_notes` (pages read with the book's usual columns) and the report's `table_like` (lines spaced like table rows: tables set in a trait's text, **not read as tables yet**) and `questions` (words joined across a line end that it could not settle). |
+   | Trait write-ups (advantages, disadvantages, perks, quirks, enhancements and limitations): a name with its type icons, a cost line under it, then text | `convert_traits.py` | the type sizes of a trait's name and of its cost line (`name_size`, `cost_size`); the icon words; the `sections` that are lists of traits, by heading and page, with their category and kind (every other section becomes a `rules` entry, and so does each box); `intro` (a name for text before the first heading); `boxes` (`leave_out` with the reason, or `adds_to` an entry, or a `name`); `rename` for two different traits of one name in one category; `not_traits` and `leave_out_lines` for name-sized lines that aren't traits; `entries` for an entry's relations, extra fields or audience. Traits are found by their headings, not listed: a name with no cost line under it is an error. Read the pages with `--boxes`, the book's type icons as words (`--icon-fonts`, `--icon-text FONT:GLYPH=[word]`, `--icons-alone`), its pull quotes set aside (`--aside-fonts FONT@SIZE`) and any character its fonts give wrongly put right (`--replace-chars READ=PRINTED`: the Basic Set's multiplication sign reads as a yen sign; list the chapter's non-ASCII characters once to find these); the plan's `layout` records the options used. Check the layout's `gutter_notes` (pages read with the book's usual columns) and the report's `tables` (every table set in a trait's text, read and checked: see **Tables** below), `table_like` (lines spaced like table rows that were not read as one) and `questions` (words joined across a line end that it could not settle). |
 
    A chapter of another kind needs a converter built first: a script that
    reads the layout JSON and a plan and writes each entry's `.json` and `.md`
@@ -127,7 +127,6 @@ PDF or anything read from it into the repo.
    |---|---|
    | Skills | name, attribute/difficulty, defaults and prerequisites lines, then prose and specialty lists |
    | Spells (*Magic*) | name, class, then prose and Duration, Cost, Time to cast, Prerequisites, Item lines |
-   | Tables in a trait's text | cost and level tables set in the columns without rules (Allies, Warp, Contacts): to be added to `convert_traits.py` |
    | Templates | point total, then attribute, advantage, disadvantage and skill lists with choices |
    | Equipment | long ruled tables by weapon skill or gear kind, with footnotes, and descriptions keyed to table rows |
    | Rules prose | sections, sidebars, tables; the WFRP Assistant's `convert_rules.py` is the model to carry over |
@@ -214,12 +213,32 @@ updated it, if any, under the same name or another. Show the Librarian that
 list and import only after they confirm it; each match becomes an
 `updated-by` relation.
 
-**Tables.** Show each table to the importer and write it only after they
-confirm it. Take every number from the source, never from memory. Show each
-one's rows (or, for a long table, its size and first and last rows, offering
-the rest) and compare its row count with the page image. A table printed as a
-flowchart or picture is transcribed by hand, keeping every word, shown, and
-noted in the chapter's notes.
+**Tables.** The tool that reads a table checks it; the Librarian does not
+confirm each one (layout §6). Take every number from the source, never from
+memory.
+
+- A reader lists every table it found in the report's `tables`, with its
+  header, rows and `failures`. A table with a failure is not written: the
+  converter stops with an error that says which check failed.
+- To put the page in front of the Librarian, open it: `python scripts/open_page.py B 37 44`
+  opens the source's PDF at each printed page in a browser window.
+- When a reader is new, or is used on a kind of table it hasn't read before,
+  show the Librarian the first three tables it produced, whole, beside their
+  page numbers, and ask whether they read as the page prints them. After
+  that, don't show tables that pass.
+- When a table fails, look at the page. Either the reader is wrong (fix it,
+  add a test on an invented table, convert again) or the page is unusual. Ask
+  the Librarian only when the reader has to change and it isn't clear how the
+  table should read.
+- The report's `table_like` lists lines spaced like table rows that no reader
+  took: look at each on the page. They are either tables the reader missed
+  (fix the reader) or text that happens to be widely spaced (say so).
+- A table printed as a flowchart or picture is transcribed by hand, keeping
+  every word, shown, and noted in the chapter's notes.
+
+Readers so far: `entry_text.with_text_tables` (a table set in the text without
+rules: a bold-italic header line, then rows; `convert_traits.py` uses it) and
+`pdf_layout.py --boxes` (a ruled table in a box, not yet used by a converter).
 
 To correct an entry's fields or relations after an import, use
 `scripts/edit_entry.py --library <root> <category>/<slug> --set FIELD=VALUE
@@ -231,7 +250,7 @@ layout, so a re-import keeps them. An entry's `gca` is not set this way (§6).
 ## 5. Write
 
 **Settle every question before the bookkeeping.** Gather every open question
-(same-name decisions, tables to confirm, hand transcriptions to show), settle
+(same-name decisions, tables that failed a check, hand transcriptions to show), settle
 them with the Librarian, apply the answers, then merge and write the
 bookkeeping once per chapter. Entry files can be written as soon as they're
 ready.

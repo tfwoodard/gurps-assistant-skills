@@ -451,3 +451,132 @@ def block_fields(seg, labels, report, name):
     fields = {labels[i['label'].lower()]: i['text'] for i in block['items'] if i['label'].lower() in labels}
     return k, merge_lines(seg[:k], block), fields
 
+
+# --- tables set in the text, without rules ---------------------------------------------------
+
+ROW_LEADING = 1.35       # x the type size: lines further apart than this are not rows of one table
+COLUMN_GAP = 0.8         # x the type size: the least width of the blank between two columns
+ALIGN_TOLERANCE = 2.5    # points: how far a column's cells may stray from its common edge or centre
+
+
+def is_table_header(l):
+    """A text table's header: one line set wholly in bold italic at the size of the text."""
+    return (not l.get('heading') and not l.get('block') and bool(l.get('spans')) and
+            all(s['bold'] and s['italic'] for s in l['spans'] if s['text'].strip()))
+
+
+def read_text_table(header, rows):
+    """A header line and the row lines under it -> (columns, rows of cells, failures).
+
+    The columns are the blanks that every row leaves clear: no row has a word there. The
+    header's words go to the column each stands over. `failures` says, in words, everything
+    about the table that does not check out; an empty list means it was read with nothing left
+    to doubt:
+
+      * the rows leave at least one blank column between them;
+      * every row has something in every column, and so does the header;
+      * each column's cells line up: on their left edges, their right edges, or their centres."""
+    size = header['size']
+    failures = []
+    left = min(l['x0'] for l in rows)
+    right = max(l['x1'] for l in rows)
+    step = 0.5
+    n = int((right - left) / step) + 1
+    covered = [False] * n
+    for l in rows:
+        for _, x0, x1 in l['words']:
+            for k in range(max(0, int((x0 - left) / step)), min(n, int((x1 - left) / step) + 1)):
+                covered[k] = True
+    seps, start = [], None
+    for k, c in enumerate(covered + [True]):
+        if not c and start is None:
+            start = k
+        elif c and start is not None:
+            if (k - start) * step >= COLUMN_GAP * size:
+                seps.append(left + (start + k) / 2 * step)
+            start = None
+    if not seps:
+        return [], [], ['its rows leave no blank column between them: it reads as one column']
+    edges = [float('-inf')] + seps + [float('inf')]
+
+    def cells(l):
+        out = [[] for _ in range(len(seps) + 1)]
+        for w in l['words']:
+            mid = (w[1] + w[2]) / 2
+            out[next(i for i in range(len(seps) + 1) if edges[i] <= mid < edges[i + 1])].append(w)
+        return out
+
+    head = cells(header)
+    columns = [' '.join(w[0] for w in c) for c in head]
+    if any(not c for c in columns):
+        failures.append(f'its header has no words over column {columns.index("") + 1}: {header["text"]!r}')
+    grid = [cells(l) for l in rows]
+    out_rows = [[' '.join(w[0] for w in c) for c in r] for r in grid]
+    for i, r in enumerate(out_rows):
+        if any(not c for c in r):
+            failures.append(f'row {i + 1} has nothing in column {r.index("") + 1}: {rows[i]["text"]!r}')
+    for c in range(len(seps) + 1):
+        col = [r[c] for r in grid if r[c]]
+        if len(col) < 2:
+            continue
+        # Where a cell can line up with the others: its left edge, its right edge, its centre, or
+        # the end of its first word (figures set to end together, their units after them: "8
+        # seconds" over "15 seconds"). Each way has its line: the place most cells share. A cell
+        # must stand on one of those lines, and a line counts only when two or more cells share it.
+        ways = {'left': [w[0][1] for w in col], 'right': [w[-1][2] for w in col],
+                'centre': [(w[0][1] + w[-1][2]) / 2 for w in col], 'figure': [w[0][2] for w in col]}
+        lines_ = {}
+        for way, xs in ways.items():
+            best = max(xs, key=lambda x: sum(1 for y in xs if abs(x - y) <= ALIGN_TOLERANCE))
+            if sum(1 for y in xs if abs(best - y) <= ALIGN_TOLERANCE) >= 2:
+                lines_[way] = best
+        stray = [k for k in range(len(col))
+                 if not any(abs(ways[way][k] - x) <= ALIGN_TOLERANCE for way, x in lines_.items())]
+        if stray:
+            texts = ', '.join(repr(' '.join(w[0] for w in col[k])) for k in stray[:4])
+            failures.append(f'in column {c + 1} ({columns[c] or "no header"}), {texts} '
+                            f'{"does" if len(stray) == 1 else "do"} not line up with the other cells')
+    return columns, out_rows, failures
+
+
+def with_text_tables(lines, report, where):
+    """Lines -> the same lines with each text table as one line carrying a table block.
+
+    A table is a header line (is_table_header) with two or more lines under it at the text's
+    leading, in its column, up to a wider gap. Each is read by read_text_table and listed in the
+    report's `tables` with its header, its rows and what did not check out. One that fails a
+    check is left as the lines it was and goes in the report's `errors`: no table is written on a
+    guess."""
+    out, i = [], 0
+    while i < len(lines):
+        l = lines[i]
+        if not is_table_header(l):
+            out.append(l)
+            i += 1
+            continue
+        rows, prev = [], l
+        for nxt in lines[i + 1:]:
+            if (nxt.get('heading') or nxt.get('block') or is_table_header(nxt) or nxt['page'] != l['page'] or
+                    nxt['column'] != l['column'] or nxt.get('box') != l.get('box') or
+                    not 0 < nxt['baseline'] - prev['baseline'] <= ROW_LEADING * l['size']):
+                break
+            rows.append(nxt)
+            prev = nxt
+        if len(rows) < 2:
+            out.append(l)
+            i += 1
+            continue
+        columns, cells, failures = read_text_table(l, rows)
+        note = {'entry': where, 'page': l['page'], 'header': l['text'], 'columns': columns, 'rows': cells,
+                'failures': failures}
+        report.setdefault('tables', []).append(note)
+        if failures:
+            report['errors'].append(f'{where} (p{l["page"]}): the table under {l["text"]!r} was not read: ' +
+                                    '; '.join(failures))
+            out += [l] + rows
+        else:
+            block = {'type': 'table', 'title': '', 'columns': columns, 'rows': cells,
+                     'data': table_data(columns, cells, report, where)}
+            out.append(merge_lines([l] + rows, block))
+        i += 1 + len(rows)
+    return out

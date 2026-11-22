@@ -54,6 +54,9 @@ Read `references/library-layout.md` for where data lives and how to cite it.
      definitions (layout §12), with the campaign's later data files applied.
      When a data file and the book disagree, give both and say which the
      campaign's characters are built with.
+   - For a value from a table in an entry, read the paragraphs the table's
+     `read_with` names as well: they say how the table carries on past its
+     last row, what to do between two rows, or that it stops there.
    - Mention any house rule that changes the answer, and rules that interact
      with it.
    - If the rules are genuinely ambiguous, say so, give the most common

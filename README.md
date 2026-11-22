@@ -150,8 +150,9 @@ it through the Claude desktop app.
 4. Ask *"what's left to import?"* at any time.
 
 Entries keep the source's exact wording and are cited by chapter, section and
-page, e.g. *(B, ch. 2 › Combat Reflexes, p. 43)*. Tables are shown to you for
-confirmation before they're written.
+page, e.g. *(B, ch. 2 › Combat Reflexes, p. 43)*. Tables are checked by the
+tool that reads them; you are shown the first few, and after that only one that
+fails a check.
 
 **Homebrew** lives in a homebrew document: a Markdown file per library or
 campaign, imported a chapter at a time
@@ -232,6 +233,7 @@ skills/<name>/         SKILL.md + references/ and scripts/ (some are synced copi
 skills/gurps-import/scripts/gdf.py             GCA data file -> JSON and index; entries' definitions -> a data file
 skills/gurps-import/scripts/add_data_file.py   add a GCA data file to the library, or read it again after it changed
 skills/gurps-import/scripts/convert_traits.py  trait write-ups (advantages, modifiers...) -> entries
+skills/gurps-import/scripts/open_page.py       open a source's PDF at a printed page, to check an import against it
 skills/gurps-import/scripts/pdf_outline.py     PDF bookmarks -> chapter list with printed pages
 skills/gurps-import/scripts/pdf_layout.py      PDF pages -> lines (by baseline and column) with style, boxes
 skills/gurps-import/scripts/entry_text.py      text helpers for converters (styles, hyphens, lists, table data)
