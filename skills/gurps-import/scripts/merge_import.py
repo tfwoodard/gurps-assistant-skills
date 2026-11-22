@@ -122,7 +122,7 @@ def main():
     ap.add_argument('--slugs', help='merge only these records (comma-separated): one batch')
     ap.add_argument('--log', help='current _import-log.json')
     ap.add_argument('--library', help='current library.json')
-    ap.add_argument('--edition', choices=('4e', '2e', '1e'),
+    ap.add_argument('--edition', choices=('4e', '3e', 'dfrpg'),
                     help="the source's rules edition (library.json or campaign.json), written on each record")
     ap.add_argument('--source')
     ap.add_argument('--chapter')
@@ -172,7 +172,7 @@ def main():
 
     def write(name, text):
         path = os.path.join(args.out, name)
-        with open(path, 'w', encoding='utf-8') as f:
+        with open(path, 'w', encoding='utf-8', newline='\n') as f:      # the same bytes on every system
             f.write(text)
         written.append((name, os.path.getsize(path)))
 

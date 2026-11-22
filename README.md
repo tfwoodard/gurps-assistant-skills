@@ -242,6 +242,7 @@ skills/gurps-import/scripts/render_entry.py    entry .json -> Markdown
 skills/gurps-import/scripts/check_coverage.py  check converted entries lost no words of the pages
 skills/gurps-import/scripts/check_names.py     check new entries sharing a name have a relation
 skills/gurps-import/scripts/edit_entry.py      correct an entry's fields or relations in place
+skills/gurps-import/scripts/write_chapter.py   write a converted chapter into a library folder, once it passes its checks
 skills/gurps-import/scripts/merge_import.py    merge index records, log, chapter status
 skills/gurps-import/scripts/import_journal.py  progress journal for resuming an import
 skills/gurps-import/scripts/print_upload.py    print files for connector uploads
