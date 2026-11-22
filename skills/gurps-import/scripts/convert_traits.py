@@ -146,6 +146,13 @@ def convert_chapter(layout, plan, taken=None):
         where = f'{category}/{slugify(name)}'
         content_lines = with_text_tables(content_lines, report, where)
         blocks = blocks_from_lines(content_lines, report, where, vocab)
+        for k, b in enumerate(blocks):
+            # A table set in the text is read with the text round it: the paragraph before says
+            # what it is a table of, the one after often carries it on ("further levels continue
+            # to double") or closes it ("this table is not open-ended"). Say which are there.
+            if b['type'] == 'table':
+                b['read_with'] = [side for side, j in (('before', k - 1), ('after', k + 1))
+                                  if 0 <= j < len(blocks) and blocks[j]['type'] == 'paragraph']
         entry = {'slug': slugify(name), 'name': name, 'source': source, 'chapter': chapter, 'section': section,
                  'page': first['page'], 'fields': fields, 'level': level, 'content': blocks}
         entry.update(extra or {})

@@ -37,7 +37,8 @@ class Page:
         self.box = box
         return self
 
-    def line(self, text, size=9.5, heading=None, bold=False, indent=0.0, right=False, gap=None, **extra):
+    def line(self, text, size=9.5, heading=None, bold=False, indent=0.0, right=False, gap=None, italic=False,
+             **extra):
         width = 0.5 * size * len(text)
         x0 = self.x + 160 - width if right else self.x + indent
         self.y += gap if gap is not None else (11.0 if size < 10 else size + 6)
@@ -225,6 +226,35 @@ class ConvertTest(unittest.TestCase):
         e = next(e for c, e in entries if e['name'] == 'Tide Sense')
         self.assertEqual((e['slug'], e['relations']), ('tide-sense-ml', [{'role': 'version-of', 'to': 'advantages/tide-sense'}]))
         self.assertEqual(report['same_name'], [{'entry': 'advantages/tide-sense', 'held_by': 'XX'}])
+
+
+class TableInTextTest(unittest.TestCase):
+    def test_a_table_in_a_traits_text_says_which_paragraphs_it_is_read_with(self):
+        p = Page()
+        p.line('GIFT LIST', size=20.0, heading=2, bold=True)
+        p.para('The gifts.')
+        p.name('Far Call')
+        p.cost('Variable')
+        p.para('The cost depends on the reach:')
+        p.line('Reach            Cost', bold=True, italic=True, gap=17.0)
+        p.line('1 mile           2 points')
+        p.line('9 miles          5 points')
+        p.line('Further reach doubles the cost.', indent=12.0, gap=17.0)
+        for l in p.lines:
+            if l['text'].startswith('Reach'):
+                l['italic'] = True
+                l['spans'][0]['italic'] = True
+        plan = {'source': 'ML', 'chapter': 'ch2', 'name_size': 14.0, 'cost_size': 11.0, 'icons': [],
+                'sections': [{'heading': 'Gift List', 'page': 10, 'traits': {'category': 'advantages', 'kind': 'advantage'}}]}
+        entries, report = convert_traits.convert_chapter({'lines': p.lines, 'regions': []}, plan)
+        self.assertEqual(report['errors'], [])
+        e = next(e for c, e in entries if e['slug'] == 'far-call')
+        self.assertEqual([b['type'] for b in e['content']], ['paragraph', 'table', 'paragraph'])
+        table = e['content'][1]
+        self.assertEqual((table['columns'], table['rows'], table['read_with']),
+                         (['Reach', 'Cost'], [['1 mile', '2 points'], ['9 miles', '5 points']], ['before', 'after']))
+        self.assertEqual(e['content'][2]['text'], 'Further reach doubles the cost.')
+        self.assertEqual(report['table_like'], [])
 
 
 class NoCostLineTest(unittest.TestCase):
