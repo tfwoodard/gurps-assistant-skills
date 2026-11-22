@@ -1,0 +1,10 @@
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "type": "command", "command": "python \"$CLAUDE_PROJECT_DIR\"/skills/gurps-import/scripts/import_journal.py show --hook" } ] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [ { "type": "command", "command": "python \"$CLAUDE_PROJECT_DIR\"/skills/gurps-import/scripts/import_journal.py show --hook" } ] }
+    ]
+  }
+}
