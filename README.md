@@ -18,8 +18,9 @@ and *GM* have specific meanings here; see [`CONTEXT.md`](CONTEXT.md).
 
 **Status: a new project.** The library format, the shared tooling, the GCA data
 file reader and writer and the character file reader are built and tested. No
-book has been imported yet, so there are no chapter converters; entry-to-GCA
-linking and writing to character files are designed but not built.
+first converter (trait write-ups) is built and runs clean on the Basic Set's
+advantages chapter; tables set inside a trait's text, entry-to-GCA linking and
+writing to character files are not built yet.
 
 ## Working with GURPS Character Assistant
 
@@ -229,6 +230,8 @@ docs/agents/           settings for agent skills (issues, labels, domain docs)
 shared/                reference files and scripts shared by the skills (edit here)
 skills/<name>/         SKILL.md + references/ and scripts/ (some are synced copies)
 skills/gurps-import/scripts/gdf.py             GCA data file -> JSON and index; entries' definitions -> a data file
+skills/gurps-import/scripts/add_data_file.py   add a GCA data file to the library, or read it again after it changed
+skills/gurps-import/scripts/convert_traits.py  trait write-ups (advantages, modifiers...) -> entries
 skills/gurps-import/scripts/pdf_outline.py     PDF bookmarks -> chapter list with printed pages
 skills/gurps-import/scripts/pdf_layout.py      PDF pages -> lines (by baseline and column) with style, boxes
 skills/gurps-import/scripts/entry_text.py      text helpers for converters (styles, hyphens, lists, table data)

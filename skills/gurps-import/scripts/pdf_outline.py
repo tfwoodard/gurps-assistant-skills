@@ -48,6 +48,12 @@ def chapter_id(title, seen):
     return cid
 
 
+def clean_title(text):
+    """A bookmark's title as people read it. Some PDFs pad their bookmark titles with NUL or
+    other unprintable characters; those and runs of spaces become one space."""
+    return ' '.join(''.join(ch if ch.isprintable() else ' ' for ch in str(text)).split())
+
+
 def walk(reader, items, depth, level=1):
     """Outline (pypdf's nested lists) -> [{"title", "pdf_page" (1-based), "children"}]."""
     out = []
@@ -60,7 +66,7 @@ def walk(reader, items, depth, level=1):
             page = reader.get_destination_page_number(it) + 1
         except Exception:  # a bookmark with no page (an external link): listed, with no page
             page = None
-        out.append({'title': str(it.title).strip(), 'pdf_page': page, 'children': []})
+        out.append({'title': clean_title(it.title), 'pdf_page': page, 'children': []})
     return out
 
 

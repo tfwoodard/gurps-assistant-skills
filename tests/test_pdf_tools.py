@@ -110,6 +110,12 @@ class PdfToolsTest(unittest.TestCase):
         self.assertIn('no page labels', r.stderr)
         self.assertEqual(json.loads(r.stdout)[0]['pages'], '2-3')
 
+    def test_outline_titles_lose_padding_characters(self):
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'skills', 'gurps-import', 'scripts'))
+        import pdf_outline
+        self.assertEqual(pdf_outline.clean_title('2. Smoke\x00\x00\x00 '), '2. Smoke')
+        self.assertEqual(pdf_outline.clean_title(' Ash, \x00 and   Cinders'), 'Ash, and Cinders')
+
     # --- pdf_layout.py ---
 
     def layout(self, pages='1-2'):

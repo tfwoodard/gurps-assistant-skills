@@ -1,0 +1,392 @@
+#!/usr/bin/env python3
+"""Convert a chapter of trait write-ups (advantages, disadvantages, modifiers) into entries.
+
+    convert_traits.py LAYOUT.json --plan PLAN.json --out OUT_DIR [--taken CATEGORY=_index.json ...]
+
+LAYOUT.json is pdf_layout.py's reading of the chapter's pages, made with --boxes, with the
+book's type icons as words (--icon-text FONT:GLYPH=[word]) and its pull quotes set aside
+(--aside-fonts). The chapter is read as the books print it:
+
+  * A heading larger than a trait's name starts a **section**. A section the plan marks `traits`
+    is a list of traits; any other becomes a `rules` entry under its own heading.
+  * In a trait list, a line at the trait-name size starts a **trait**: its name, then the icons
+    that give its types. The line under it, at the cost size, is its cost as printed
+    ("15 points", "5 points/level", "Variable", "+50%") or a pointer ("see Rank, p. 29").
+    Everything up to the next trait is its text; smaller headings in it are its own.
+  * Each **box** is a `rules` entry of its own, named by its title, unless the plan says
+    otherwise.
+  * Pull quotes repeat words of the text and are left out, and listed.
+
+The plan (kept in Drive beside the source, never in the repo):
+
+    {"source": "B", "chapter": "ch2",
+     "name_size": 14.0, "cost_size": 11.0,
+     "icons": ["exotic", "mental", "physical", "social", "supernatural", "attack"],
+     "sections": [{"heading": "Advantage List", "page": 34,
+                   "traits": {"category": "advantages", "kind": "advantage"}}],
+     "boxes": {"32.1": {"leave_out": "the chapter's title, printed in a frame"},
+               "46.1": {"adds_to": "advantages/damage-resistance"}},
+     "entries": {"advantages/luck": {"relations": [...], "fields": {...}, "audience": "gm"}},
+     "not_traits": [{"page": 32, "text": "Mental, Physical, and Social"}],
+     "intro": {"name": "Advantages"},
+     "rename": [{"page": 110, "name": "Armor Divisor", "to": "Armor Divisor (Limitation)"}],   (+ "section" when two share a page)
+     "leave_out_lines": [{"page": 52, "text": "GURPS", "why": "lettering in the picture"}]}
+
+`intro` names the entry for text printed before the chapter's first heading. `rename` gives a
+trait another name than the one printed, where two different things in one category share one
+(layout §4); the printed name stays in the entry's `fields.printed_name`. `leave_out_lines` are
+single lines that are not text of the chapter.
+
+`sections` names only the sections that are trait lists (matched by heading and page; a heading
+set over two or more lines is given joined). A list whose traits print no cost line of their own,
+because the section's text gives one cost for all (perks), has `"no_cost_line": true` in its
+`traits`, with the cost the text states under `fields`; `"name_size"` there is the size its
+traits' names are set in, when it is not the chapter's. `--taken` gives the slugs other sources hold: a
+trait of the same name in the same category becomes a `version-of` it (docs/adr/0007).
+
+Writes OUT_DIR/<category>--<slug>.json and .md, `_records.json` (index records, each with
+`_category`) and `_report.json`: `errors` (the conversion is not to be used while there are
+any), `questions`, `left_out`, `dehyphenated`, `table_like` (lines spaced like table rows, to
+be looked at on the page) and counts. Exit status 1 when there are errors.
+"""
+import argparse
+import json
+import os
+import re
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from entry_text import (blocks_from_lines, fix_case, mark_paragraphs, marked, plain, slugify,  # noqa: E402
+                        vocabulary)
+from render_entry import render  # noqa: E402
+
+PRINTED_FIELDS = ('cost', 'types', 'see')        # fields that hold words printed on the page
+SEE = re.compile(r'^see\b', re.I)
+
+
+def near(a, b, tol=0.3):
+    return abs(a - b) <= tol
+
+
+def heading_text(run):
+    """The words of a heading set over one or more lines, as printed."""
+    return ' '.join(plain(marked(l)) for l in run)
+
+
+def group_headings(lines, is_heading):
+    """[(kind, run of lines)]: consecutive heading lines of one size, close together, are one
+    heading; every other line is its own run."""
+    out = []
+    for l in lines:
+        if is_heading(l) and out and out[-1][0] == 'heading' and near(out[-1][1][-1]['size'], l['size']) and \
+                out[-1][1][-1]['page'] == l['page'] and out[-1][1][-1]['column'] == l['column'] and \
+                0 < l['baseline'] - out[-1][1][-1]['baseline'] < 1.6 * l['size']:
+            out[-1][1].append(l)
+        else:
+            out.append(('heading' if is_heading(l) else 'line', [l]))
+    return out
+
+
+def split_name(text, icons):
+    """'Clinging [physical] [exotic]' -> ('Clinging', ['physical', 'exotic'], '[physical] [exotic]').
+    'X [mental]/[physical] [exotic]' gives all three, and the printed form says which are either/or."""
+    pat = r'\[(' + '|'.join(map(re.escape, icons)) + r')\]'
+    m = re.search(r'\s*' + pat, text)
+    if not m:
+        return text.strip(), [], ''
+    tail = text[m.start():].strip()
+    rest = re.sub(pat, '', tail)
+    if rest.strip(' /,'):
+        return None, [], tail                       # words after the icons: not a trait's name line
+    return text[:m.start()].strip(), re.findall(pat, tail), tail
+
+
+def table_like(l):
+    """A body line spaced like a table's row: a gap between two of its words far wider than a
+    word space."""
+    ws = l.get('words') or []
+    return any(b[1] - a[2] > 2.5 * l['size'] for a, b in zip(ws, ws[1:]))
+
+
+def convert_chapter(layout, plan, taken=None):
+    taken = taken or {}
+    report = {'errors': [], 'questions': [], 'left_out': [], 'dehyphenated': [], 'table_like': [],
+              'printed_fields': list(PRINTED_FIELDS), 'same_name': [], 'counts': {}}
+    icons = plan.get('icons', [])
+    name_size, cost_size = plan['name_size'], plan['cost_size']
+    source, chapter = plan['source'], plan['chapter']
+    box_plans = plan.get('boxes', {})
+    lines = [l for l in layout['lines'] if not l.get('furniture')]
+    for l in lines:
+        if l.get('aside'):
+            report['left_out'].append({'page': l['page'], 'text': l['text'], 'why': 'pull quote'})
+    lines = [l for l in lines if not l.get('aside')]
+    for spec in plan.get('leave_out_lines', []):
+        hit = [l for l in lines if l['page'] == spec['page'] and l['text'].strip() == spec['text']]
+        if not hit:
+            report['errors'].append(f'plan leave_out_lines: no line {spec["text"]!r} on p{spec["page"]}')
+        for l in hit:
+            report['left_out'].append({'page': l['page'], 'text': l['text'], 'why': spec['why']})
+        lines = [l for l in lines if not any(l is h for h in hit)]
+    renames = {(r['page'], r['name'], r.get('section', '').lower()): r for r in plan.get('rename', [])}
+    renamed = set()
+
+    def rename_key(page, name, section):
+        return next((k for k in ((page, name, section.lower()), (page, name, '')) if k in renames), None)
+    vocab = vocabulary(lines)
+    if plan.get('indent', True):
+        mark_paragraphs(lines)
+    body = [l for l in lines if not l.get('box')]
+    not_traits = {(n['page'], n['text']) for n in plan.get('not_traits', [])}
+    trait_sections = {(s['page'], s['heading'].lower()): s for s in plan.get('sections', [])}
+    used_sections = set()
+    entries = []           # (category, entry)
+
+    def add(category, name, first, section, fields, content_lines, level, base_size, extra=None):
+        where = f'{category}/{slugify(name)}'
+        blocks = blocks_from_lines(content_lines, report, where, vocab)
+        entry = {'slug': slugify(name), 'name': name, 'source': source, 'chapter': chapter, 'section': section,
+                 'page': first['page'], 'fields': fields, 'level': level, 'content': blocks}
+        entry.update(extra or {})
+        for l in content_lines:
+            if not l.get('heading') and table_like(l):
+                report['table_like'].append({'entry': where, 'page': l['page'], 'text': l['text']})
+        entries.append((category, entry))
+        return entry
+
+    # --- sections of the page text -----------------------------------------------------------
+    runs = group_headings(body, lambda l: bool(l.get('heading')))
+    section_at = [i for i, (k, run) in enumerate(runs) if k == 'heading' and run[0]['size'] > name_size + 0.3]
+    if not section_at or section_at[0] != 0:
+        stray = [l for k, run in runs[:section_at[0] if section_at else len(runs)] for l in run]
+        if stray and plan.get('intro'):
+            # text before the first heading (the chapter's opening, its title set apart in a frame)
+            add('rules', plan['intro']['name'], stray[0], plan['intro']['name'],
+                dict(plan.get('rules_fields', {}), **plan['intro'].get('fields', {})), stray, 1, 1e9)
+        elif stray:
+            report['errors'].append(f'p{stray[0]["page"]}: text before the chapter\'s first heading: {stray[0]["text"][:60]!r}')
+    parents = {}           # heading size -> the heading now open at that size
+    for n, i in enumerate(section_at):
+        head = runs[i][1]
+        title_printed = heading_text(head)
+        title = fix_case(title_printed)
+        size = head[0]['size']
+        parents = {s: t for s, t in parents.items() if s > size}
+        parent = parents[min(parents)] if parents else title
+        parents[size] = title
+        end = section_at[n + 1] if n + 1 < len(section_at) else len(runs)
+        inner = runs[i + 1:end]
+        spec = trait_sections.get((head[0]['page'], title.lower())) or trait_sections.get((head[0]['page'], title_printed.lower()))
+        level = head[0].get('heading', 1)
+        if not spec:
+            content = [l for _, run in inner for l in run]
+            if content or n + 1 == len(section_at) or runs[section_at[n + 1]][1][0]['size'] >= size:
+                if content:
+                    add('rules', title, head[0], parent, dict(plan.get('rules_fields', {})), content, level, size)
+                else:
+                    report['questions'].append({'entry': f'rules/{slugify(title)}', 'kind': 'heading-only',
+                                                'text': f'p{head[0]["page"]}: {title!r} has no text of its own'})
+                    report['left_out'].append({'page': head[0]['page'], 'text': title_printed, 'why': 'a heading with nothing under it but other entries'})
+            else:
+                report['left_out'].append({'page': head[0]['page'], 'text': title_printed,
+                                           'why': 'a heading with nothing under it but other entries'})
+            continue
+        used_sections.add((spec['page'], spec['heading'].lower()))
+        t = spec['traits']
+        # split the section at its trait names
+        starts = []
+        for j, (k, run) in enumerate(inner):
+            if k == 'heading' and near(run[0]['size'], t.get('name_size', name_size)) and \
+                    (run[0]['page'], heading_text(run)) not in not_traits:
+                starts.append(j)
+        intro = [l for _, run in inner[:starts[0] if starts else len(inner)] for l in run]
+        if intro:
+            add('rules', title, head[0], parent, dict(plan.get('rules_fields', {})), intro, level, size)
+        else:
+            report['left_out'].append({'page': head[0]['page'], 'text': title_printed,
+                                       'why': 'a heading with nothing under it but other entries'})
+        for m, j in enumerate(starts):
+            name_run = inner[j][1]
+            printed = heading_text(name_run)
+            name, types, tail = split_name(printed, icons)
+            page = name_run[0]['page']
+            if name is None:
+                report['errors'].append(f'p{page}: {printed!r}: words after the type icons; if this is not a '
+                                        f'trait\'s name, list it in the plan\'s not_traits')
+                continue
+            printed_name, key = name, rename_key(page, name, title)
+            if key:
+                renamed.add(key)
+                name = renames[key]['to']
+            rest = [l for _, run in inner[j + 1:starts[m + 1] if m + 1 < len(starts) else len(inner)] for l in run]
+            cost_lines = []
+            while not t.get('no_cost_line') and rest and near(rest[0]['size'], cost_size) and rest[0].get('heading') and \
+                    rest[0]['page'] == (cost_lines or name_run)[-1]['page'] and \
+                    0 < rest[0]['baseline'] - (cost_lines or name_run)[-1]['baseline'] < 1.8 * name_size and \
+                    len(cost_lines) < 3 and (not cost_lines or abs(rest[0]['x1'] - cost_lines[0]['x1']) < 2.5):
+                # A cost set over two lines keeps the right-hand edge of its first; a heading in the
+                # trait's text ("Special Limitations") starts from the left.
+                cost_lines.append(rest.pop(0))
+            fields = {'kind': t['kind']}
+            if key:
+                fields['printed_name'] = printed_name
+            if types:
+                fields['types'] = types
+                if '/' in tail or ',' in tail:
+                    fields['types_printed'] = tail
+            if t.get('no_cost_line'):
+                # A list whose traits print no cost of their own: the section's text gives one for
+                # all of them (every perk costs 1 point), which the plan states in `fields`.
+                if not rest:
+                    report['errors'].append(f'p{page}: {name!r} has no text')
+                    continue
+                cost = None
+            elif not cost_lines:
+                report['errors'].append(f'p{page}: {name!r} has no cost line under its name; if it is not a '
+                                        f'trait, list it in the plan\'s not_traits')
+                continue
+            else:
+                cost = ' '.join(plain(marked(l)) for l in cost_lines)
+            if cost is None:
+                pass
+            elif SEE.match(cost):
+                fields['see'] = cost
+            else:
+                fields['cost'] = cost
+                fields['leveled'] = bool(re.search(r'/\s*level', cost))
+            fields.update(t.get('fields', {}))
+            add(t['category'], name, name_run[0], title, fields, rest, name_run[0].get('heading', level + 1),
+                t.get('name_size', name_size))
+
+    for key in set(renames) - renamed:
+        report['errors'].append(f'plan rename: no trait {key[1]!r} on p{key[0]}')
+    for key in set(trait_sections) - used_sections:
+        report['errors'].append(f'plan section {trait_sections[key]["heading"]!r} (p{key[0]}) matches no heading; '
+                                f'headings found: ' + '; '.join(f'p{runs[i][1][0]["page"]} {fix_case(heading_text(runs[i][1]))}' for i in section_at))
+
+    # --- boxes -------------------------------------------------------------------------------
+    for region in layout.get('regions', []):
+        bid = region['id']
+        bl = [l for l in lines if l.get('box') == bid]
+        bp = box_plans.get(bid, {})
+        if not bl:
+            continue
+        if bp.get('leave_out'):
+            report['left_out'] += [{'page': l['page'], 'text': l['text'], 'why': bp['leave_out']} for l in bl]
+            continue
+        if region.get('kind') == 'table':
+            report['errors'].append(f'box {bid} (p{region["page"]}) is a ruled table: this converter does not read tables yet')
+            continue
+        bruns = group_headings(bl, lambda l: bool(l.get('heading')))
+        if bruns[0][0] != 'heading' and not bp.get('name'):
+            report['errors'].append(f'box {bid} (p{region["page"]}) has no title: give it a name in the plan\'s boxes')
+            continue
+        title_run = bruns[0][1] if bruns[0][0] == 'heading' else []
+        name = bp.get('name') or fix_case(heading_text(title_run))
+        content = [l for _, run in bruns[1 if title_run else 0:] for l in run]
+        extra = {'relations': [{'role': 'adds-to', 'to': bp['adds_to']}]} if bp.get('adds_to') else {}
+        fields = dict(plan.get('rules_fields', {}), box=True)
+        add('rules', name, bl[0], bp.get('section', name), fields, content, (title_run or bl)[0].get('heading', 2),
+            (title_run or bl)[0]['size'], extra)
+    for bid in box_plans:
+        if bid not in {r['id'] for r in layout.get('regions', [])}:
+            report['errors'].append(f'plan box {bid} is not a box in the layout')
+
+    # --- slugs, the plan's own notes on entries, names shared with other sources --------------
+    seen = {}
+    kinds = {}
+    out = []
+    for category, e in entries:
+        ref = f'{category}/{e["slug"]}'
+        if ref in seen and e['fields'].get('kind') and kinds[ref] and e['fields']['kind'] != kinds[ref]:
+            # The book gives two different traits one name and tells them apart by their kind (an
+            # enhancement and a limitation both called Armor Divisor), as the data files do: both
+            # keep the name, the later takes its kind in its slug, and each is marked distinct.
+            first = ref
+            e['slug'] = f'{e["slug"]}-{slugify(e["fields"]["kind"])}'
+            ref = f'{category}/{e["slug"]}'
+            e.setdefault('relations', []).append({'role': 'distinct-from', 'to': first})
+            report['same_name'].append({'entry': ref, 'same_name_as': first,
+                                        'told_apart_by': f'kind: {e["fields"]["kind"]} / {kinds[first]}'})
+        if ref in seen:
+            report['errors'].append(f'{ref}: two entries of this chapter take this slug (p{seen[ref]} and p{e["page"]}); '
+                                    f'give one a `slug` or `name` in the plan\'s entries')
+            continue
+        seen[ref] = e['page']
+        kinds[ref] = e['fields'].get('kind')
+        ep = plan.get('entries', {}).get(ref, {})
+        e['fields'].update(ep.get('fields', {}))
+        if ep.get('relations'):
+            e['relations'] = e.get('relations', []) + ep['relations']
+        if ep.get('audience'):
+            e['audience'] = ep['audience']
+        other = taken.get(category, {}).get(e['slug'])
+        if other and other != source:
+            if not any(r['to'] == ref for r in e.get('relations', [])):
+                e.setdefault('relations', []).append({'role': 'version-of', 'to': ref})
+            report['same_name'].append({'entry': ref, 'held_by': other})
+            e['slug'] = f'{e["slug"]}-{slugify(source)}'
+        if not e['content'] and 'see' not in e['fields']:
+            report['errors'].append(f'{ref} (p{e["page"]}): no text')
+        out.append((category, e))
+    for ref in plan.get('entries', {}):
+        if ref not in seen:
+            report['errors'].append(f'plan entry {ref} matches no entry of the chapter')
+    for category, _ in out:
+        report['counts'][category] = report['counts'].get(category, 0) + 1
+    return out, report
+
+
+def record(category, e):
+    r = {'_category': category, 'slug': e['slug'], 'name': e['name'], 'source': e['source'],
+         'chapter': e['chapter'], 'section': e['section'], 'page': e['page']}
+    r.update({k: v for k, v in e['fields'].items() if k != 'box'})
+    for k in ('relations', 'audience', 'gca'):
+        if e.get(k):
+            r[k] = e[k]
+    return r
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument('layout')
+    ap.add_argument('--plan', required=True)
+    ap.add_argument('--out', required=True)
+    ap.add_argument('--taken', action='append', default=[], metavar='CATEGORY=INDEX.json')
+    a = ap.parse_args(argv)
+    with open(a.layout, encoding='utf-8') as f:
+        layout = json.load(f)
+    with open(a.plan, encoding='utf-8') as f:
+        plan = json.load(f)
+    taken = {}
+    for t in a.taken:
+        category, _, path = t.partition('=')
+        with open(path, encoding='utf-8') as f:
+            taken[category] = {r['slug']: r['source'] for r in json.load(f)}
+    entries, report = convert_chapter(layout, plan, taken)
+    os.makedirs(a.out, exist_ok=True)
+    for old in os.listdir(a.out):
+        if old.endswith(('.json', '.md')):
+            os.remove(os.path.join(a.out, old))
+    for category, e in entries:
+        base = os.path.join(a.out, f'{category}--{e["slug"]}')
+        with open(base + '.json', 'w', encoding='utf-8', newline='\n') as f:
+            json.dump(e, f, ensure_ascii=False, indent=1)
+            f.write('\n')
+        with open(base + '.md', 'w', encoding='utf-8', newline='\n') as f:
+            f.write(render(e))
+    with open(os.path.join(a.out, '_records.json'), 'w', encoding='utf-8', newline='\n') as f:
+        json.dump([record(c, e) for c, e in entries], f, ensure_ascii=False, indent=1)
+        f.write('\n')
+    with open(os.path.join(a.out, '_report.json'), 'w', encoding='utf-8', newline='\n') as f:
+        json.dump(report, f, ensure_ascii=False, indent=1)
+        f.write('\n')
+    print(json.dumps({'counts': report['counts'], 'errors': len(report['errors']), 'questions': len(report['questions']),
+                      'left_out': len(report['left_out']), 'table_like': len(report['table_like'])}))
+    for e in report['errors']:
+        print('error:', e, file=sys.stderr)
+    return 1 if report['errors'] else 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())
