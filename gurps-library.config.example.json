@@ -1,0 +1,11 @@
+{
+  "$comment": "Copy to gurps-library.config.json (gitignored) and fill in. See README > Configuration.",
+  "drive_folder_id": "PASTE_DRIVE_FOLDER_ID_HERE",
+  "drive_folder_name": "GURPS Assistant",
+  "drive_local_path": "",
+  "gca_system_path": "",
+  "gca_user_path": "",
+  "default_campaign": "",
+  "edition": "4e",
+  "layout_version": 1
+}

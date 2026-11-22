@@ -1,0 +1,13 @@
+{
+  "name": "gurps-assistant-skills",
+  "owner": {
+    "name": "tfwoodard"
+  },
+  "plugins": [
+    {
+      "name": "gurps-assistant",
+      "source": "./",
+      "description": "GURPS (4e) table assistant backed by your own rulebook library in Google Drive, working alongside GURPS Character Assistant."
+    }
+  ]
+}

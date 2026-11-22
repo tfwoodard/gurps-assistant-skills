@@ -1,0 +1,128 @@
+#!/usr/bin/env python3
+"""Check that a chapter's converted entries lost no words of its pages.
+
+    check_coverage.py LAYOUT.json OUT_DIR [--ignore WORD ...]
+
+Counts every word of the chapter's lines in LAYOUT.json (from pdf_layout.py;
+page furniture left out) and every word in the entries a converter wrote to
+OUT_DIR (each <slug>.json's name and content, and a trapping's printed
+fields: its price, damage, group and so on), plus the strings its
+`_report.json` lists under `left_out` (art credits, captions, anything left out
+on purpose), the words it joined across a line end (`dehyphenated`) and the
+copies of a joined table's key column (`folded_keys`, counted and said). A word
+the pages have more often than the output is listed with
+the line it came from. Exit status 1 when any word is missing.
+
+`--ignore` excuses a word, and the output says every word it excused and how
+often: no silent exceptions.
+"""
+import argparse
+import collections
+import glob
+import json
+import os
+import re
+import sys
+
+WORD = re.compile(r"[\w’'+−–-]+")
+PROFILE_FIELDS = {'characteristics', 'traits', 'optional_traits', 'profiles', 'skills', 'talents', 'spells',
+                  'trappings', 'marks', 'special', 'title', 'profile_name'}
+SKIP_KEYS = {'slug', 'source', 'chapter', 'section', 'page', 'level', 'type', 'id', 'relations', 'audience',
+             'kind', 'edition', 'ordered', 'before', 'start', 'span', 'data', 'fields'}
+
+
+def words(s):
+    """Lower-cased words, split at hyphens too, so a word hyphenated across two lines on the
+    page ("tried-" / "and-tested") counts the same as the joined word ("tried-and-tested")."""
+    s = re.sub(r'\*+', ' ', s).replace('\u00ad', '').lower()
+    out = []
+    for w in WORD.findall(s):
+        out += [p.strip("’'–") for p in re.split(r'[-−]', w) if p.strip("’'–")]
+    return out
+
+
+def strings(x, key=None):
+    """Every printed string in an entry: names, text, cells and labels, but not its bookkeeping
+    fields or the typed `data` copy of a table (that would count its cells twice)."""
+    if key in SKIP_KEYS:
+        return
+    if isinstance(x, str):
+        yield x
+    elif isinstance(x, (int, float)) and not isinstance(x, bool) and key not in (None,):
+        yield str(x)
+    elif isinstance(x, list):
+        for v in x:
+            yield from strings(v, '')
+    elif isinstance(x, dict):
+        for k, v in x.items():
+            yield from strings(v, k)
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument('layout')
+    ap.add_argument('out')
+    ap.add_argument('--ignore', nargs='*', default=[])
+    a = ap.parse_args(argv)
+
+    with open(a.layout, encoding='utf-8') as f:
+        doc = json.load(f)
+    page = collections.Counter()
+    where = {}
+    furniture = collections.Counter()
+    for l in doc['lines']:
+        if l.get('furniture'):
+            if l['text'].strip() != str(l['page']):      # every line left out but the page numbers
+                furniture[l['text']] += 1
+            continue
+        for w in words(l['text']):
+            page[w] += 1
+            where.setdefault(w, f'p{l["page"]}: {l["text"]}')
+
+    got = collections.Counter()
+    for p in sorted(glob.glob(os.path.join(a.out, '*.json'))):
+        name = os.path.basename(p)
+        with open(p, encoding='utf-8') as f:
+            data = json.load(f)
+        if name == '_report.json':
+            for s in data.get('left_out', []):
+                got.update(words(s if isinstance(s, str) else s.get('text', '')))
+            for d in data.get('dehyphenated', []):     # printed split over two lines, joined in the entry
+                got.update(words(d['from']))
+            for d in data.get('folded_keys', []):      # a key column printed once per part, kept once
+                n = sum(len(words(c)) for c in d['cells'])
+                print(f'credited: {n} words of {d["region"]} ({d["entry"]}): its key column, printed '
+                      f'once per part, kept once (folded_keys)')
+                for c in d['cells']:
+                    got.update(words(c))
+        elif not name.startswith('_'):
+            # A trapping's values (price, damage, group) are its printed table cells; its kind isn't.
+            fields = data.get('fields', {})
+            printed = {k: v for k, v in fields.items() if k != 'kind'} if 'price' in fields else \
+                {k: v for k, v in fields.items() if k in PROFILE_FIELDS}
+            # A creature's profile (characteristics, traits) is its printed stat block.
+            for s in strings({'name': data.get('name', ''), 'content': data.get('content', []),
+                              'cells': list(printed.values())}):
+                got.update(words(s))
+
+    ignored = {w.lower() for w in a.ignore}
+    missing, excused = [], []
+    for w, n in sorted(page.items()):
+        short = n - got.get(w, 0)
+        if short > 0:
+            (excused if w in ignored else missing).append((w, short))
+    for w, n in excused:
+        print(f'excused: {w!r} x{n} (--ignore)')
+    for w, n in missing:
+        print(f'missing: {w!r} x{n}  first seen {where[w]}')
+    # No silent exceptions: the lines the layout set aside as page furniture are shown, so a body
+    # line among the running heads is seen.
+    for text, n in sorted(furniture.items(), key=lambda kv: (-kv[1], kv[0])):
+        print(f'page furniture: {text!r}' + (f' x{n}' if n > 1 else ''))
+    if not missing:
+        print(f'every word of {sum(page.values())} is accounted for')
+    return 1 if missing else 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())
