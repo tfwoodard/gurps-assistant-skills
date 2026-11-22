@@ -173,11 +173,29 @@ class ConvertTest(unittest.TestCase):
                          [('The marsh gives and the marsh', 'pull quote'), ('BOAT', 'lettering in the picture'),
                           ('FLAWS', 'a heading with nothing under it but other entries')])
 
-    def test_a_line_spaced_like_a_table_row_and_a_hyphen_it_could_not_settle_are_reported(self):
+    def test_a_line_spaced_like_a_table_row_and_a_word_joined_across_a_line_end_are_reported(self):
         self.assertEqual([(t['entry'], t['text']) for t in self.report['table_like']],
                          [('advantages/webbed-hands', 'You swim well. Row one       3 yards')])
-        self.assertEqual([(q['entry'], q['kind']) for q in self.report['questions']],
-                         [('advantages/tide-sense', 'hyphen-unresolved')])
+        self.assertEqual(self.report['questions'], [])
+        self.assertEqual(self.report['dehyphenated'], [{'entry': 'advantages/tide-sense', 'from': 'wher-ever',
+                                                        'to': 'wherever', 'why': 'a half is not a word by itself'}])
+        self.assertEqual(self.by['advantages/tide-sense']['content'][0]['text'], 'You feel the tide turn, wherever you are.')
+
+    def test_the_plans_whole_words_and_the_books_word_list_settle_broken_words(self):
+        p = Page()
+        p.line('GIFT LIST', size=20.0, heading=2, bold=True)
+        p.para('The gifts.')
+        p.name('Far Call')
+        p.cost('Variable')
+        p.para('Even the mail-', 'room clerk hears a near-', 'perfect call, mean-', 'ing yours.')
+        plan = {'source': 'ML', 'chapter': 'ch2', 'name_size': 14.0, 'cost_size': 11.0, 'icons': [],
+                'whole_words': ['mailroom'],
+                'sections': [{'heading': 'Gift List', 'page': 10, 'traits': {'category': 'advantages', 'kind': 'advantage'}}]}
+        doc = {'lines': p.lines, 'regions': []}
+        entries, report = convert_traits.convert_chapter(doc, plan, None, {'mail', 'room', 'near', 'perfect', 'meaning'})
+        e = next(e for c, e in entries if e['slug'] == 'far-call')
+        self.assertEqual(e['content'][0]['text'], 'Even the mailroom clerk hears a near-perfect call, meaning yours.')
+        self.assertEqual(report['questions'], [])
 
     def test_a_name_with_no_cost_and_plan_lines_that_match_nothing_are_errors(self):
         doc = chapter()

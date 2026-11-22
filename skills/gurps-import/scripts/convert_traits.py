@@ -2,6 +2,7 @@
 """Convert a chapter of trait write-ups (advantages, disadvantages, modifiers) into entries.
 
     convert_traits.py LAYOUT.json --plan PLAN.json --out OUT_DIR [--taken CATEGORY=_index.json ...]
+                      [--words WORDS.txt]
 
 LAYOUT.json is pdf_layout.py's reading of the chapter's pages, made with --boxes, with the
 book's type icons as words (--icon-text FONT:GLYPH=[word]) and its pull quotes set aside
@@ -32,6 +33,8 @@ The plan (kept in Drive beside the source, never in the repo):
      "rename": [{"page": 110, "name": "Armor Divisor", "to": "Armor Divisor (Limitation)"}],   (+ "section" when two share a page)
      "leave_out_lines": [{"page": 52, "text": "GURPS", "why": "lettering in the picture"}]}
 
+`whole_words` lists words broken at a line's end that are one word, where the converter kept the
+hyphen for want of evidence (the report's `hyphens_kept` gives each such case and why).
 `intro` names the entry for text printed before the chapter's first heading. `rename` gives a
 trait another name than the one printed, where two different things in one category share one
 (layout §4); the printed name stays in the entry's `fields.printed_name`. `leave_out_lines` are
@@ -108,7 +111,7 @@ def table_like(l):
     return any(b[1] - a[2] > 2.5 * l['size'] for a, b in zip(ws, ws[1:]))
 
 
-def convert_chapter(layout, plan, taken=None):
+def convert_chapter(layout, plan, taken=None, words=None):
     taken = taken or {}
     report = {'errors': [], 'questions': [], 'left_out': [], 'dehyphenated': [], 'table_like': [], 'tables': [],
               'printed_fields': list(PRINTED_FIELDS), 'same_name': [], 'counts': {}}
@@ -133,7 +136,8 @@ def convert_chapter(layout, plan, taken=None):
 
     def rename_key(page, name, section):
         return next((k for k in ((page, name, section.lower()), (page, name, '')) if k in renames), None)
-    vocab = vocabulary(lines)
+    vocab = vocabulary(lines) | set(words or ())     # the chapter's words, and the book's when given
+    vocab |= {w.lower() for w in plan.get('whole_words', [])}      # broken words the plan says are one word
     if plan.get('indent', True):
         mark_paragraphs(lines)
     body = [l for l in lines if not l.get('box')]
@@ -361,6 +365,8 @@ def main(argv=None):
     ap.add_argument('--plan', required=True)
     ap.add_argument('--out', required=True)
     ap.add_argument('--taken', action='append', default=[], metavar='CATEGORY=INDEX.json')
+    ap.add_argument('--words', help='the words the whole book prints (book_words.py), to settle words broken '
+                                    'at a line end that the chapter alone cannot')
     a = ap.parse_args(argv)
     with open(a.layout, encoding='utf-8') as f:
         layout = json.load(f)
@@ -371,7 +377,11 @@ def main(argv=None):
         category, _, path = t.partition('=')
         with open(path, encoding='utf-8') as f:
             taken[category] = {r['slug']: r['source'] for r in json.load(f)}
-    entries, report = convert_chapter(layout, plan, taken)
+    words = None
+    if a.words:
+        with open(a.words, encoding='utf-8') as f:
+            words = {w.strip() for w in f if w.strip()}
+    entries, report = convert_chapter(layout, plan, taken, words)
     os.makedirs(a.out, exist_ok=True)
     for old in os.listdir(a.out):
         if old.endswith(('.json', '.md')):
