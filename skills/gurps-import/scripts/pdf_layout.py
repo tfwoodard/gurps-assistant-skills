@@ -90,6 +90,8 @@ from pdfminer.pdffont import PDFSimpleFont
 # font (`case_fixed` in the output). Small-caps fonts ("-SC" in the name) are left alone: they set
 # their small capitals at those codes too, and entry_text.fix_case() restores those words.
 CASE_FIXED = collections.Counter()
+REPLACE_CHARS = {}                       # characters a book's fonts give wrongly -> what the page prints (--replace-chars)
+CHARS_REPLACED = collections.Counter()
 _to_unichr = PDFSimpleFont.to_unichr
 
 
@@ -836,6 +838,9 @@ def page_lines(page, page_no, icon_fonts=(), marks=None, shapes=None, regions=No
         if tilt(c):
             tilted.append(c)
             continue
+        if c['text'] in REPLACE_CHARS:
+            CHARS_REPLACED[c['text']] += 1
+            c = dict(c, text=REPLACE_CHARS[c['text']])
         chars.append(c)
     for cv in page.curves:
         if cv['x1'] - cv['x0'] < SHAPE_MAX and cv['bottom'] - cv['top'] < SHAPE_MAX and cv.get('fill'):
@@ -982,8 +987,11 @@ def assign_headings(lines):
 
 
 def read(pdf_path, first, last, offset, icon_fonts=(), boxes=False, icon_text=None, margin_lines=(),
-         aside_fonts=(), icons_alone=False):
+         aside_fonts=(), icons_alone=False, replace_chars=None):
     CASE_FIXED.clear()
+    REPLACE_CHARS.clear()
+    REPLACE_CHARS.update(replace_chars or {})
+    CHARS_REPLACED.clear()
     with pdfplumber.open(pdf_path) as pdf:
         n = len(pdf.pages)
         if first + offset < 1 or last + offset > n:
@@ -1045,7 +1053,8 @@ def read(pdf_path, first, last, offset, icon_fonts=(), boxes=False, icon_text=No
             'fonts': [{'size': s, 'chars': c} for s, c in sorted(sizes.items(), reverse=True)],
             'gutters': gutters, 'gutter_notes': gutter_notes, 'pages_without_text': empty, 'lines': lines,
             'marks': marks, 'shapes': shapes,
-            'regions': regions, 'image_notes': notes, 'drop_capitals': drops, 'case_fixed': dict(CASE_FIXED)}
+            'regions': regions, 'image_notes': notes, 'drop_capitals': drops, 'case_fixed': dict(CASE_FIXED),
+            'chars_replaced': {f'{k}={REPLACE_CHARS[k]}': n for k, n in CHARS_REPLACED.items()}}
 
 
 def text_view(doc):
@@ -1071,6 +1080,10 @@ def main(argv=None):
     ap.add_argument('--margin-lines', nargs='*', default=[], metavar='TEXT',
                     help='lines printed in a page margin that are text, not page furniture, each given '
                          'whole (a handout set to the edges of its page: its title, its last line)')
+    ap.add_argument('--replace-chars', nargs='*', default=[], metavar='READ=PRINTED',
+                    help='a character the PDF gives wrongly and the one the page prints, for a font whose '
+                         'encoding misnames a glyph (a multiplication sign read as a yen sign); each is counted '
+                         'in `chars_replaced`')
     ap.add_argument('--icons-alone', action='store_true',
                     help='with --icon-text: an icon glyph with no text beside it makes a line of its own '
                          '(icons turned over to the line under a heading); otherwise it is left out of the text')
@@ -1092,7 +1105,7 @@ def main(argv=None):
         if not at or not font:
             sys.exit(f'--aside-fonts {x}: write FONT@SIZE, e.g. Garamond-Italic@14')
     doc = read(a.pdf, first, last, a.page_offset, a.icon_fonts, a.boxes, icon_text, a.margin_lines, aside_fonts,
-               a.icons_alone)
+               a.icons_alone, dict(x.split('=', 1) for x in a.replace_chars))
     if doc['pages_without_text']:
         print('no text layer on printed pages ' + ', '.join(map(str, doc['pages_without_text'])) +
               ': look at the page images, and ask before running OCR', file=sys.stderr)

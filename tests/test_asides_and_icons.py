@@ -93,6 +93,14 @@ class AsideAndIconTest(unittest.TestCase):
         self.assertIn('Storm Lamp [square] [disc]', [l['text'] for l in doc['lines']])
         self.assertEqual(sorted(m['text'] for m in doc['marks']), ['1', '3'])
 
+    def test_a_character_the_fonts_give_wrongly_is_replaced_and_counted(self):
+        doc = self.layout('--replace-chars', 'K=C', 'G=B')
+        texts = {l['text'] for l in doc['lines']}
+        self.assertIn('Ceepers trim the wicks at dusk.', texts)
+        self.assertIn('Bulls circle the tower all day.', texts)
+        self.assertEqual(doc['chars_replaced'], {'K=C': 13, 'G=B': 23})
+        self.assertEqual(self.layout()['chars_replaced'], {})
+
     def test_a_badly_written_aside_font_is_refused(self):
         r = subprocess.run([sys.executable, os.path.join(SCRIPTS, 'pdf_layout.py'), self.pdf, '--pages', '1',
                             '--aside-fonts', 'Helvetica-Oblique'], capture_output=True, text=True)
