@@ -220,6 +220,8 @@ memory.
 - A reader lists every table it found in the report's `tables`, with its
   header, rows and `failures`. A table with a failure is not written: the
   converter stops with an error that says which check failed.
+- To put the page in front of the Librarian, open it: `python scripts/open_page.py B 37 44`
+  opens the source's PDF at each printed page in a browser window.
 - When a reader is new, or is used on a kind of table it hasn't read before,
   show the Librarian the first three tables it produced, whole, beside their
   page numbers, and ask whether they read as the page prints them. After
