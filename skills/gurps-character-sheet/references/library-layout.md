@@ -136,8 +136,8 @@ definition are found in the same place.
       "kind": "pdf",
       "edition": "4e",
       "files": [
-        { "file": "sources/B/GURPS Basic Set - Characters.pdf", "pages": "1-336", "page_offset": 0 },
-        { "file": "sources/B/GURPS Basic Set - Campaigns.pdf", "pages": "337-576", "page_offset": 336 }
+        { "file": "sources/B/GURPS Basic Set - Characters.pdf", "pages": "1-336", "page_offset": 2 },
+        { "file": "sources/B/GURPS Basic Set - Campaigns.pdf", "pages": "337-576", "page_offset": -335 }
       ],
       "data_files": ["GURPS Basic Set 4th Ed.--Characters.gdf"],
       "chapters": [
@@ -159,7 +159,7 @@ Each source has:
 | `title` | Full title. |
 | `edition` | What the source was written for: `4e`, `3e`, or `dfrpg` (the Dungeon Fantasy Roleplaying Game). §8 says how editions mix in a campaign. |
 | `kind` | `pdf`, `gdoc` (Google Doc), `file` (other text file, including a homebrew document), or `pasted` (text given in the conversation). |
-| `files` | The source's files, each with its path in Drive (relative to the folder holding `sources/`), the **printed** pages it holds, and its `page_offset`: printed page number minus PDF page index. A book printed as two volumes with one run of page numbers (the Basic Set) is one source with two files. `pages` and entry `page` fields are always printed page numbers; tools add the offset to find the PDF page. Not used for `pasted`. |
+| `files` | The source's files, each with its path in Drive (relative to the folder holding `sources/`), the **printed** pages it holds, and its `page_offset`: the PDF page number minus the printed page number, which is what the tools take as `--page-offset` (2 when a cover and a blank come before printed page 1; negative for a second volume whose PDF starts at 1 but whose printed pages carry on from the first). A book printed as two volumes with one run of page numbers (the Basic Set) is one source with two files. `pages` and entry `page` fields are always printed page numbers; tools add the offset to find the PDF page. Not used for `pasted`. |
 | `data_files` | The GCA data files that define this source's traits, by file name (§12). Empty or left out when there is none yet. |
 | `chapters` | The source's table of contents, recorded when the source is added. `pages` is the printed page range. `status` is `not-imported`, `imported`, or `problems` (imported, but some entries failed checks: `notes` says which). `date` is the last import. |
 

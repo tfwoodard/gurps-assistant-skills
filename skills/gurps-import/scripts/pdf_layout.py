@@ -115,6 +115,7 @@ FULL_PAGE_ROWS = 24                      # rows of body text from which a three-
 THIRD_SHARE = 0.2                        # ...and the least share of its words each column holds
 SHAPE_MAX = 20                           # points: larger drawings aren't icons
 BOX_MIN = (100, 24)                      # points: a smaller image isn't a boxed panel
+RULE_MAX_WIDTH = 3.0                     # points: a thicker stroke is a band of tint, not a table's rule
 RUN_ON_GAP = 4.0                         # points: a word this near a box's edge is on the same line
 STANDFIRST_LINES = 8       # an opening paragraph across the page may run to this many lines
 STANDFIRST_SHARE = 0.2     # of the words under it, at least this share on each side of a gutter
@@ -602,6 +603,17 @@ def find_boxes(page, page_no, notes=None):
                     notes.append(dict(where, note=f'illustration ({opaque:.0%} opaque): not a box'))
                 continue
         boxes.append((x0, top, x1, bottom))
+    # A panel can also be a frame drawn round it: an outline with no fill of its own (a tint
+    # under it is drawn separately), whatever its corners (square, cut off, rounded).
+    for shape in list(page.rects) + list(page.curves):
+        if not shape.get('stroke') or shape.get('fill'):
+            continue
+        x0, top = max(0.0, shape['x0']), max(0.0, shape['top'])
+        x1, bottom = min(page.width, shape['x1']), min(page.height, shape['bottom'])
+        w, h = x1 - x0, bottom - top
+        if w < BOX_MIN[0] or h < BOX_MIN[1] or w * h > 0.8 * area:
+            continue
+        boxes.append((x0, top, x1, bottom))
     return sorted(set(boxes), key=lambda b: (b[1], b[0]))
 
 
@@ -632,7 +644,10 @@ def read_table(page, box, lines):
     # start or end within RULE_SLACK of the panel's sides.
     about = lambda o: o['x0'] >= x0 - RULE_SLACK and o['x1'] <= x1 + RULE_SLACK and o['top'] >= top - 2 and \
         o['bottom'] <= bottom + 2
-    hl = [l for l in page.lines if about(l) and abs(l['top'] - l['bottom']) < 1 and l['x1'] - l['x0'] > 20]
+    # A stroke thicker than a rule is paint, not a rule: a panel's graded tint can be drawn as a
+    # stack of thick strokes lying edge to edge.
+    hl = [l for l in page.lines if about(l) and abs(l['top'] - l['bottom']) < 1 and l['x1'] - l['x0'] > 20 and
+          (l.get('linewidth') or 0) <= RULE_MAX_WIDTH]
     vl = [l for l in page.lines if inside(l) and abs(l['x0'] - l['x1']) < 1 and l['bottom'] - l['top'] > 6]
     bands = [r for r in page.rects if inside(r) and r['x1'] - r['x0'] > 15 and 4 < r['bottom'] - r['top'] < 60]
     rules = merge_near([l['top'] for l in hl] + [r['top'] for r in bands] + [r['bottom'] for r in bands])
