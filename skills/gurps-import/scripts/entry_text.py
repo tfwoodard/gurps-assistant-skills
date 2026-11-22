@@ -62,14 +62,15 @@ def fix_case(text):
     if not all_caps and not re.search(r'[a-z][A-Z]|\b[a-z]+[A-Z]|^[a-z]|\b[A-Z]{2}[a-z]', text):
         return text
     out = []
-    for i, orig in enumerate(text.split(' ')):
+    parts = text.split(' ')
+    for i, orig in enumerate(parts):
         w = orig.lower()
         core = re.sub(r'[^A-Za-z]', '', orig)
         if core.upper() in ACRONYMS:
             out.append(orig.upper())                        # an acronym (XP, SL) in capitals
         elif re.fullmatch(r'[a-z]\.', orig):
             out.append(orig)                                # an abbreviation ("c." for circa)
-        elif i and w in SMALL_WORDS and not out[-1].endswith(':'):
+        elif i and i < len(parts) - 1 and w in SMALL_WORDS and not out[-1].endswith(':'):   # not a title's last word
             out.append(w)
         else:
             k = next((j for j, ch in enumerate(w) if ch.isalpha()), 0)   # "(elves)" -> "(Elves)"
@@ -155,9 +156,51 @@ def runs_on(prev, l):
             bool(re.match(r'^[a-z]', plain(l['text']))))
 
 
+SENTENCE_END = re.compile(r'[.!?:;…]["”’)\]]*\**$')
+INDENT = (5.0, 22.0)                  # points: a paragraph's first line starts this much further in
+
+
+def mark_paragraphs(lines):
+    """For books that show a new paragraph by indenting its first line, with no space above it:
+    give every line `para` (True where a paragraph starts), which new_paragraph() then goes by.
+
+    A line starts a paragraph when it stands in from the line below it in its column (or, for a
+    paragraph of one line, from the line above) and the line above it ends a sentence or isn't in
+    its column. Lines that step sideways round a picture don't end sentences, so they aren't
+    taken for paragraphs. A column's first line that isn't indented carries on the paragraph
+    before it, wherever that broke."""
+    def group(l):
+        return (l['page'], l['column'], l.get('box'))
+
+    body = [l for l in lines if not l.get('heading')]
+    pos = {id(l): i for i, l in enumerate(lines)}
+    edge = {}                         # each column's left edge: the least x0 of its lines
+    for l in body:
+        edge[group(l)] = min(edge.get(group(l), l['x0']), l['x0'])
+    for i, l in enumerate(body):
+        prev = body[i - 1] if i and group(body[i - 1]) == group(l) and pos[id(body[i - 1])] == pos[id(l)] - 1 and \
+            0 < l['baseline'] - body[i - 1]['baseline'] < 2.5 * l['size'] else None
+        nxt = body[i + 1] if i + 1 < len(body) and group(body[i + 1]) == group(l) and \
+            pos[id(body[i + 1])] == pos[id(l)] + 1 and 0 < body[i + 1]['baseline'] - l['baseline'] < 2.5 * l['size'] else None
+        ended = prev is None or bool(SENTENCE_END.search(plain(prev['text'])))
+        if nxt is not None and INDENT[0] <= l['x0'] - nxt['x0'] <= INDENT[1]:
+            l['para'] = ended
+        elif prev is not None and prev.get('para') and abs(l['x0'] - prev['x0']) < 1.5:
+            l['para'] = ended                      # one-line paragraphs, one after another
+        elif prev is not None and INDENT[0] <= l['x0'] - prev['x0'] <= INDENT[1]:
+            l['para'] = ended                      # a one-line paragraph that ends its column
+        elif prev is None and INDENT[0] <= l['x0'] - edge[group(l)] <= INDENT[1]:
+            l['para'] = True                       # a one-line paragraph under a heading, or opening a column
+        else:
+            l['para'] = False
+    return lines
+
+
 def new_paragraph(l, prev):
     if prev is None or l.get('box') != prev.get('box') or l.get('scrap') != prev.get('scrap'):
         return True
+    if 'para' in l:                   # the book indents its paragraphs: mark_paragraphs() has read them
+        return l['para']
     if l['column'] != prev['column'] or l['page'] != prev['page'] or l['baseline'] < prev['baseline']:
         return not runs_on(prev, l)
     return l['baseline'] - prev['baseline'] > 1.6 * prev['size']

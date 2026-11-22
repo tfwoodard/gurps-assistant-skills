@@ -110,23 +110,24 @@ PDF or anything read from it into the repo.
    python scripts/check_coverage.py scratch/ch2-layout.json scratch/out-ch2
    ```
 
-   **There are no converters yet.** This repo starts with the tools every
-   converter is built on, carried over from the WFRP Assistant: the layout
-   reader, `entry_text.py` (styles, hyphens, lists, table data),
-   `render_entry.py`, the coverage and name checks, the merge and the journal.
-   The first chapters imported will each need a converter built first: a
-   script that reads the layout JSON and a plan and writes each entry's `.json`
-   and `.md` (`render_entry.py`), `_records.json` (index records) and
-   `_report.json` (errors, left-out text, questions), with tests on an invented
-   PDF in `tests/`, in its own pull request. Look at the real pages before
-   designing one. The kinds the Basic Set needs:
+   Converters so far:
+
+   | Kind | Script | Plan says |
+   |---|---|---|
+   | Trait write-ups (advantages, disadvantages, perks, quirks, enhancements and limitations): a name with its type icons, a cost line under it, then text | `convert_traits.py` | the type sizes of a trait's name and of its cost line (`name_size`, `cost_size`); the icon words; the `sections` that are lists of traits, by heading and page, with their category and kind (every other section becomes a `rules` entry, and so does each box); `intro` (a name for text before the first heading); `boxes` (`leave_out` with the reason, or `adds_to` an entry, or a `name`); `rename` for two different traits of one name in one category; `not_traits` and `leave_out_lines` for name-sized lines that aren't traits; `entries` for an entry's relations, extra fields or audience. Traits are found by their headings, not listed: a name with no cost line under it is an error. Read the pages with `--boxes`, the book's type icons as words (`--icon-fonts`, `--icon-text FONT:GLYPH=[word]`, `--icons-alone`) and its pull quotes set aside (`--aside-fonts FONT@SIZE`); the plan's `layout` records the options used. Check the layout's `gutter_notes` (pages read with the book's usual columns) and the report's `table_like` (lines spaced like table rows: tables set in a trait's text, **not read as tables yet**) and `questions` (words joined across a line end that it could not settle). |
+
+   A chapter of another kind needs a converter built first: a script that
+   reads the layout JSON and a plan and writes each entry's `.json` and `.md`
+   (`render_entry.py`), `_records.json` (index records) and `_report.json`
+   (errors, left-out text, questions), with tests on invented pages in
+   `tests/`, in its own pull request. Look at the real pages before designing
+   one. The kinds the Basic Set still needs:
 
    | Kind | What the pages look like |
    |---|---|
-   | Trait lists (advantages, disadvantages, perks, quirks) | a heading with the trait's name, then a line with its point cost and type symbols, then prose; "see p. 00" lines; boxed special enhancements and limitations |
    | Skills | name, attribute/difficulty, defaults and prerequisites lines, then prose and specialty lists |
    | Spells (*Magic*) | name, class, then prose and Duration, Cost, Time to cast, Prerequisites, Item lines |
-   | Modifiers (enhancements and limitations) | name with its percentage, then prose |
+   | Tables in a trait's text | cost and level tables set in the columns without rules (Allies, Warp, Contacts): to be added to `convert_traits.py` |
    | Templates | point total, then attribute, advantage, disadvantage and skill lists with choices |
    | Equipment | long ruled tables by weapon skill or gear kind, with footnotes, and descriptions keyed to table rows |
    | Rules prose | sections, sidebars, tables; the WFRP Assistant's `convert_rules.py` is the model to carry over |
@@ -293,16 +294,17 @@ Data files are read where they are on disk: GCA's own folders
 (`gca_system_path`/`books` for the published ones, `gca_user_path`/`books` for
 the user's) or the library's local folder.
 
-1. Read it and look at the report:
+1. Read it and look at the report (`--dry-run` writes nothing):
 
    ```
-   python scripts/gdf.py parse "<path>/GURPS Basic Set 4th Ed.--Characters.gdf" \
-       --out scratch/parsed.json --index scratch/records.json
+   python scripts/add_data_file.py --library <root> \
+       "<path>/GURPS Basic Set 4th Ed.--Characters.gdf" --source B --dry-run
    ```
 
-   It prints the header, the number of definitions in each section, and
-   `problems`: lines it could not read as a definition, each with its line
-   number and why. Published files have a few (a tag typed with a space before
+   It gives the number of definitions in each section, the files it
+   `Requires` and whether the library has them, what changed since the file
+   was last read, and `problems`: lines it could not read as a definition,
+   each with its line number and why. Published files have a few (a tag typed with a space before
    its bracket, a missing comma). Show them; they go in the data file's
    `notes`, and the file's status is `problems` only if a definition the
    library needs is among them. Never correct a published file.
@@ -310,12 +312,11 @@ the user's) or the library's local folder.
    draws on; the description says what it covers). A file that only changes
    other files (a house rules file of `#ReplaceTags` commands) belongs to no
    source, or to the group's homebrew document.
-3. Copy the file, unchanged and under its own name, to `gca/books/` (a
-   campaign's own to its `gca/`). Write the parsed JSON to
-   `gca/parsed/<file-slug>.json`, add its records to `gca/parsed/_index.json`
-   (replacing any that were there for this file), and add or update its record
-   in `library.json` → `data_files` with its SHA-256, counts and date, and the
-   file name in its source's `data_files`.
+3. Run it again without `--dry-run`. It copies the file, unchanged and under
+   its own name, to `gca/books/` (`--folder` for a campaign's own), writes the
+   parsed JSON to `gca/parsed/<file-slug>.json`, replaces the file's records
+   in `gca/parsed/_index.json`, and adds or replaces its record in
+   `library.json` → `data_files` and its name in its source's `data_files`.
 4. Say what it `Requires` and whether those files are in the library.
 
 GCA's updater replaces published files. When a file's SHA-256 no longer

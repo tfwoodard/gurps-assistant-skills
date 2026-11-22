@@ -80,6 +80,13 @@ def main(argv=None):
             where.setdefault(w, f'p{l["page"]}: {l["text"]}')
 
     got = collections.Counter()
+    # A converter says which of its entries' fields hold words printed on the page (a trait's
+    # cost line, the types its icons give) in its report's `printed_fields`.
+    printed_fields = set()
+    report_path = os.path.join(a.out, '_report.json')
+    if os.path.exists(report_path):
+        with open(report_path, encoding='utf-8') as f:
+            printed_fields = set(json.load(f).get('printed_fields', []))
     for p in sorted(glob.glob(os.path.join(a.out, '*.json'))):
         name = os.path.basename(p)
         with open(p, encoding='utf-8') as f:
@@ -99,7 +106,7 @@ def main(argv=None):
             # A trapping's values (price, damage, group) are its printed table cells; its kind isn't.
             fields = data.get('fields', {})
             printed = {k: v for k, v in fields.items() if k != 'kind'} if 'price' in fields else \
-                {k: v for k, v in fields.items() if k in PROFILE_FIELDS}
+                {k: v for k, v in fields.items() if k in PROFILE_FIELDS or k in printed_fields}
             # A creature's profile (characteristics, traits) is its printed stat block.
             for s in strings({'name': data.get('name', ''), 'content': data.get('content', []),
                               'cells': list(printed.values())}):

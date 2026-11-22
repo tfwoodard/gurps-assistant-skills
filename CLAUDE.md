@@ -137,11 +137,13 @@ These cost real time there; don't relearn them.
 Built and tested: the library layout; the PDF layout and outline readers, entry
 text helpers, renderer, coverage and name checks, merge, journal, entry editor
 (all from WFRP); the library reader, lookup and excerpt tools; the data file
-reader and writer (`gdf.py`, run against every data file on this computer); the
-character file reader and sheet (`gca5.py`).
+reader and writer (`gdf.py`, run against every data file on this computer) and
+`add_data_file.py`; the character file reader and sheet (`gca5.py`); the trait
+converter (`convert_traits.py`).
 
-Not built: any converter (no book has been imported), linking entries to
-definitions, writing to character files. `skills/gurps-import/SKILL.md` and
+Not built: tables set inside a trait's text; converters for skills, spells,
+templates, equipment tables, rules prose and creatures; linking entries to
+definitions; writing to character files. `skills/gurps-import/SKILL.md` and
 `skills/gurps-character-sheet/references/character-files.md` say what each
 needs first.
 
