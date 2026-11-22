@@ -781,15 +781,25 @@ def icon_words(page, words, icon_text, marks_here, shapes_here):
     in a named font, or a drawing with a given number of points ("pts:57"). Each sits on the
     baseline of the text beside it; one with no text beside it is left out."""
     out = []
-    items = [(m, icon_text.get(next((k for k in icon_text if not k.startswith('pts:') and
-                                      k.lower() in m['font'].lower()), None)))
-             for m in marks_here if not m['text'].isspace()]
+
+    def glyph_text(m):
+        """The text for one glyph: "Font:GLYPH=TEXT" for that glyph of a font whose glyphs mean
+        different things, else "Font=TEXT" for any glyph of the font."""
+        fonts = [k for k in icon_text if not k.startswith('pts:')]
+        for k in fonts:
+            font, sep, glyph = k.rpartition(':')
+            if sep and font.lower() in m['font'].lower() and glyph == m['text']:
+                return icon_text[k]
+        return icon_text.get(next((k for k in fonts if ':' not in k and k.lower() in m['font'].lower()), None))
+
+    items = [(m, glyph_text(m)) for m in marks_here if not m['text'].isspace()]
     items += [(sh, icon_text.get(f'pts:{sh["pts"]}')) for sh in shapes_here]
-    for it, text in items:
+    # Left to right, so an icon standing after another icon finds that one beside it.
+    for it, text in sorted(items, key=lambda x: (round(x[0]['top']), x[0]['x0'])):
         if not text:
             continue
         cy = (it['top'] + it['bottom']) / 2
-        near = [w for w in words if w['top'] - 2 <= cy <= w['bottom'] + 2 and
+        near = [w for w in list(words) + out if w['top'] - 2 <= cy <= w['bottom'] + 2 and
                 (abs(w['x0'] - it['x1']) < 12 or abs(it['x0'] - w['x1']) < 12)]
         if not near:
             continue
@@ -801,7 +811,7 @@ def icon_words(page, words, icon_text, marks_here, shapes_here):
 
 
 def page_lines(page, page_no, icon_fonts=(), marks=None, shapes=None, regions=None, icon_text=None,
-               notes=None, drops=None):
+               notes=None, drops=None, aside_fonts=()):
     """One page -> (lines in reading order, gutter x or None). Icon glyphs go to `marks`, small
     drawings to `shapes`, when those lists are given. With `regions` (a list), boxed panels are
     read as regions of their own: their lines follow the page's body lines, tagged with the box,
@@ -827,6 +837,13 @@ def page_lines(page, page_no, icon_fonts=(), marks=None, shapes=None, regions=No
         marks += marks_here
     if shapes is not None:
         shapes += shapes_here
+    # Text set apart in a face of its own (a pull quote: words of the body repeated large across
+    # the columns) is taken out before the columns are found, so it neither joins the lines beside
+    # it nor cuts the columns in two. Its lines follow the page's, marked `aside`.
+    is_aside = lambda c: any(font_name(c.get('fontname', '')) == f and abs(c['size'] - z) < 0.3 for f, z in aside_fonts)
+    aside_chars = [c for c in chars if is_aside(c)] if aside_fonts else []
+    if aside_chars:
+        chars = [c for c in chars if not is_aside(c)]
     words = make_words(chars, page.height, page_no, drops)
     if icon_text:
         words += icon_words(page, words, icon_text, marks_here, shapes_here)
@@ -855,6 +872,12 @@ def page_lines(page, page_no, icon_fonts=(), marks=None, shapes=None, regions=No
                                           max(c['size'] for c in w['chars']) <= usual], page.width)
     out = order_lines(body, gutters, page_no, page.height)
     keep_run_on(out, page_no, page.height)
+    if aside_chars:
+        asides = order_lines(make_words(aside_chars, page.height), (), page_no, page.height)
+        for l in asides:
+            l['aside'] = True
+            l['furniture'] = False
+        out += asides
     out += tilted_lines(tilted, page_no, page.width, page.height)
     for i, box in enumerate(boxes):
         bw = [w for w in words if in_box.get(id(w)) == i]
@@ -902,7 +925,7 @@ def keep_run_on(lines, page_no, height):
 def assign_headings(lines):
     sizes = collections.Counter()
     for l in lines:
-        if not l['furniture']:
+        if not l['furniture'] and not l.get('aside'):
             for s in l['spans']:
                 sizes[s['size']] += len(s['text'])
     if not sizes:
@@ -922,7 +945,7 @@ def assign_headings(lines):
     larger = [s for s in larger if all(abs(s - b) > 0.4 for b in box_bodies)]
     level = {s: i + 1 for i, s in enumerate(larger)}
     for l in lines:
-        if l['furniture']:
+        if l['furniture'] or l.get('aside'):
             continue
         # A heading that runs on in smaller type ("Bell Ringing (Str) basic") is set by its lead:
         # a bold span at a heading size, a word or more long (not a drop capital).
@@ -935,7 +958,8 @@ def assign_headings(lines):
     return sizes, body
 
 
-def read(pdf_path, first, last, offset, icon_fonts=(), boxes=False, icon_text=None, margin_lines=()):
+def read(pdf_path, first, last, offset, icon_fonts=(), boxes=False, icon_text=None, margin_lines=(),
+         aside_fonts=()):
     CASE_FIXED.clear()
     with pdfplumber.open(pdf_path) as pdf:
         n = len(pdf.pages)
@@ -945,7 +969,7 @@ def read(pdf_path, first, last, offset, icon_fonts=(), boxes=False, icon_text=No
         lines, marks, shapes, empty, gutters, regions, notes, drops = [], [], [], [], {}, [], [], []
         for p in range(first, last + 1):
             got, gutters_here = page_lines(pdf.pages[p + offset - 1], p, icon_fonts, marks, shapes,
-                                     regions if boxes else None, icon_text, notes, drops)
+                                     regions if boxes else None, icon_text, notes, drops, aside_fonts)
             gutters[str(p)] = [round(g, 1) for g in gutters_here] or None
             if not got:
                 empty.append(p)
@@ -984,12 +1008,24 @@ def main(argv=None):
     ap.add_argument('--margin-lines', nargs='*', default=[], metavar='TEXT',
                     help='lines printed in a page margin that are text, not page furniture, each given '
                          'whole (a handout set to the edges of its page: its title, its last line)')
+    ap.add_argument('--aside-fonts', nargs='*', default=[], metavar='FONT@SIZE',
+                    help='a face that sets text apart from the columns (a pull quote), by its font name and '
+                         'size: its lines are read on their own, after those of the page, and carry `aside`')
     ap.add_argument('--out', help='write the layout JSON here')
     ap.add_argument('--text', action='store_true', help='print a readable view instead of JSON')
     a = ap.parse_args(argv)
     first, last = parse_pages(a.pages)
     icon_text = dict(x.split('=', 1) for x in a.icon_text)
-    doc = read(a.pdf, first, last, a.page_offset, a.icon_fonts, a.boxes, icon_text, a.margin_lines)
+    aside_fonts = []
+    for x in a.aside_fonts:
+        font, at, size = x.rpartition('@')
+        try:
+            aside_fonts.append((font, float(size)))
+        except ValueError:
+            at = ''
+        if not at or not font:
+            sys.exit(f'--aside-fonts {x}: write FONT@SIZE, e.g. Garamond-Italic@14')
+    doc = read(a.pdf, first, last, a.page_offset, a.icon_fonts, a.boxes, icon_text, a.margin_lines, aside_fonts)
     if doc['pages_without_text']:
         print('no text layer on printed pages ' + ', '.join(map(str, doc['pages_without_text'])) +
               ': look at the page images, and ask before running OCR', file=sys.stderr)
