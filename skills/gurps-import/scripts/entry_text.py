@@ -906,6 +906,14 @@ def with_text_tables(lines, report, where):
             out += headers + rows
             i = j
             continue
+        if not read_text_table(headers, rows)[0]:
+            # Lines under a bold-italic line that leave no blank column between them are prose (a
+            # book's title set in bold italics at a line's start), not a table: listed, not read.
+            report.setdefault('not_tables', []).append({'entry': where, 'page': l['page'], 'text': l['text'],
+                                                        'why': 'the lines under it read as one column'})
+            out += headers + rows
+            i = j
+            continue
         block = table_block(headers, rows, report, where)
         if block is None:
             out += headers + rows

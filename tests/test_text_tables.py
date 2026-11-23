@@ -255,7 +255,7 @@ class TextTableTest(unittest.TestCase):
         self.assertIn("in column 2 (Cost), '10 points' does not line up with the other cells", report['errors'][0])
         self.assertEqual(len(report['tables'][0]['failures']), 1)
 
-    def test_a_row_with_an_empty_cell_and_rows_with_no_blank_between_columns_fail(self):
+    def test_a_row_with_an_empty_cell_fails_and_lines_with_no_blank_between_columns_are_text(self):
         t = table([[(70, '1 mile'), right(190, '2 points')],
                    [(70, '10 miles')],
                    [(70, '100 miles'), right(190, '10 points')]],
@@ -263,8 +263,11 @@ class TextTableTest(unittest.TestCase):
         _, report = self.read(t)
         self.assertIn("row 2 has nothing in column 2: '10 miles'", report['errors'][0])
         t = table([[(70, 'one two three four')], [(70, 'five six seven eight')]], [(70, 'Reach'), (160, 'Cost')])
-        _, report = self.read(t)
-        self.assertIn('its rows leave no blank column between them', report['errors'][0])
+        out, report = self.read(t)
+        self.assertEqual(report['errors'], [])
+        self.assertEqual(len(out), 3)
+        self.assertEqual(report['not_tables'], [{'entry': 'advantages/tide-sense', 'page': 10, 'text': 'Reach Cost',
+                                                 'why': 'the lines under it read as one column'}])
 
     def test_a_cell_carried_onto_a_second_line_joins_its_row(self):
         t = table([[(70, 'cut'), (130, 'cutting')],
