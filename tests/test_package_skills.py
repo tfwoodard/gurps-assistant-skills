@@ -47,6 +47,34 @@ class PackageTest(unittest.TestCase):
             self.assertEqual(pk.collect(os.path.join(d, 'dist'), 'players', [], up), [])
             self.assertFalse(os.path.exists(os.path.join(up, 'players')))
 
+    def test_the_hash_is_of_the_contents_and_a_zip_beside_the_manifest_is_checked(self):
+        import zipfile
+
+        def rezip(src, dst, level, change=None):
+            with zipfile.ZipFile(src) as a, zipfile.ZipFile(dst, 'w', zipfile.ZIP_DEFLATED, compresslevel=level) as b:
+                for info in a.infolist():
+                    data = a.read(info)
+                    if change and info.filename.endswith('SKILL.md'):
+                        data += change
+                    b.writestr(info, data, compresslevel=level)
+
+        with tempfile.TemporaryDirectory() as d:
+            m = pk.package(os.path.join(d, 'dist'))['players']
+            z = 'gurps-rules-lookup.zip'
+            built = os.path.join(d, 'dist', 'players', z)
+            drive = os.path.join(d, 'drive')
+            os.makedirs(drive)
+            rezip(built, os.path.join(drive, z), 1)          # same files, other bytes
+            with open(os.path.join(drive, z), 'rb') as f, open(built, 'rb') as g:
+                self.assertNotEqual(f.read(), g.read())
+            self.assertEqual(pk.contents_sha(os.path.join(drive, z)), m['zips'][z])
+            manifest = os.path.join(drive, 'manifest.json')
+            with open(manifest, 'w') as f:                    # an old manifest, hashing the zip's bytes
+                json.dump(dict(m, zips=dict(m['zips'], **{z: 'bytes'})), f)
+            self.assertEqual(pk.changed_zips(m, manifest), ([], m['version']))
+            rezip(built, os.path.join(drive, z), 1, change=b'\nInvented extra line.\n')
+            self.assertEqual(pk.changed_zips(m, manifest), ([z], m['version']))
+
     def test_the_command_line_refuses_an_unknown_folder(self):
         r = subprocess.run([sys.executable, os.path.join(ROOT, 'scripts', 'package-skills.py'), '--compare', 'dm=x.json'],
                            capture_output=True, text=True)
