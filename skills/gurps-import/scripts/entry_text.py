@@ -625,6 +625,7 @@ def whole_end(w):
 
 
 FLUSH_GAP = 2.0          # x the type size: the least gap before a cell of a flush-right last column
+TABLE_NOTE = re.compile(r'^[*†‡]+')   # a line's first word: a note under a table, keyed to a mark in its cells
 
 
 def flush_right_tails(headers, rows, size, right):
@@ -740,6 +741,7 @@ def read_text_table(header, rows):
         return out
 
     grid = [cells(i, l) for i, l in enumerate(rows)]
+    grid_all = grid                   # each line's cells, before rows over two lines are joined
     extent = []                       # each column's cells, from their leftmost edge to their rightmost
     for c in range(ncols):
         ws = [w for r in grid for w in r[c]]
@@ -884,7 +886,18 @@ def read_text_table(header, rows):
         else:
             merged.append(([list(c) for c in r], [l]))
             first_lines.append(r)
-    out_rows = [[' '.join(w[0] for w in c) for c in r] for r, _ in merged]
+    def cell_text(ws):
+        # a cell carried on to the next line after a slash ("Salt/" over "Pepper Mill") joins it
+        # with no space; a slash and a space on one line ("w/ salt") stay as printed
+        out = ''
+        for k, w in enumerate(ws):
+            joined = k and ws[k - 1][0].endswith('/') and id(ws[k - 1]) in line_ends
+            out += ('' if not k or joined else ' ') + w[0]
+        return out
+
+    line_ends = {id(c[-1]) for r in grid_all for c in r if c}
+
+    out_rows = [[cell_text(c) for c in r] for r, _ in merged]
     rows = [ls[0] for _, ls in merged]
     grid = first_lines
     for i, r in enumerate(out_rows):
@@ -981,7 +994,10 @@ def with_text_tables(lines, report, where):
             headers.append(lines[j])
             j += 1
         rows, prev = [], headers[-1]
-        while j < len(lines) and not is_table_header(lines[j]) and follows(lines[j], prev, l):
+        # A line starting with a note's mark ("* Only by day.") is the table's note, set under
+        # its rows: it and what follows stay text.
+        while j < len(lines) and not is_table_header(lines[j]) and follows(lines[j], prev, l) and \
+                not (lines[j].get('words') and TABLE_NOTE.match(lines[j]['words'][0][0])):
             rows.append(lines[j])
             prev = lines[j]
             j += 1

@@ -246,6 +246,20 @@ class PdfToolsTest(unittest.TestCase):
         self.assertEqual(r.returncode, 0)
         self.assertIn("excused: 'fog' x1 (--ignore)", r.stdout)
 
+    def test_coverage_fails_while_a_glyph_has_no_character(self):
+        doc = self.layout()
+        self.assertEqual(doc['unmapped_glyphs'], [])           # the reader always says, even when none
+        out = os.path.join(self.d, 'out')
+        self.entries(out, 'Trimmers keep the lamps of the harbour burning through fog.')
+        layout = os.path.join(self.d, 'layout.json')
+        doc['unmapped_glyphs'] = [{'glyph': '(cid:129)', 'font': 'LampDings', 'count': 4, 'first_page': 2}]
+        with open(layout, 'w') as f:
+            json.dump(doc, f)
+        r = run('check_coverage.py', layout, out)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('unmapped glyph: (cid:129) in LampDings x4, first on p2', r.stdout)
+        self.assertIn('accounted for', r.stdout)                # the words are all there; the glyph is not
+
     def test_a_word_joined_across_a_line_end_with_a_figure_after_it_counts_the_same(self):
         sys.path.insert(0, SCRIPTS)
         import check_coverage

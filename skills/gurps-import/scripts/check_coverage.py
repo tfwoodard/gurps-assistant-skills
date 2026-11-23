@@ -128,9 +128,16 @@ def main(argv=None):
     # line among the running heads is seen.
     for text, n in sorted(furniture.items(), key=lambda kv: (-kv[1], kv[0])):
         print(f'page furniture: {text!r}' + (f' x{n}' if n > 1 else ''))
+    # A glyph the fonts give no character for ("(cid:129)") is counted as a word wherever it
+    # went, but reads as nonsense there: the pages are not read right until --replace-chars
+    # says what they print.
+    glyphs = doc.get('unmapped_glyphs', [])
+    for g in glyphs:
+        print(f'unmapped glyph: {g["glyph"]} in {g["font"]} x{g["count"]}, first on p{g["first_page"]}: '
+              f'say what the page prints there with --replace-chars (the plan\'s replace_chars)')
     if not missing:
         print(f'every word of {sum(page.values())} is accounted for')
-    return 1 if missing else 0
+    return 1 if missing or glyphs else 0
 
 
 if __name__ == '__main__':
