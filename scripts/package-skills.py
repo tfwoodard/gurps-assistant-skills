@@ -4,18 +4,21 @@
     dist/players/<skill>.zip   player skills: uploaded to the library's skills/ folder
     dist/gm/<skill>.zip        GM-only skills: uploaded to each campaign's gm/skills/ folder
     dist/<folder>/README.md      what's there, the version, how to install
-    dist/<folder>/manifest.json  the version and each zip's SHA-256, uploaded with the zips, so the
-                                 next packaging can tell which zips changed
+    dist/<folder>/manifest.json  the version and a SHA-256 of each zip's contents, uploaded with the
+                                 zips, so the next packaging can tell which zips changed
 
 The Librarian's skills (library setup and import) are never packaged: they're used from the repo.
-Zips are reproducible (fixed timestamps and order), so an unchanged skill gives identical bytes and
-only changed zips need uploading.
+Zips are reproducible (fixed timestamps and order). The manifest hashes what is in a zip (each
+file's name, mode and bytes), not the zip itself: another Python's zlib compresses the same files
+to different bytes, and that is no reason to upload a skill again.
 
     package-skills.py --compare players=<manifest.json from the library's skills/> \
                       [--compare gm=<manifest.json from a campaign's gm/skills/>] [--upload DIR]
 
 --compare says which zips differ from the ones the given manifest describes (a path that doesn't
-exist means nothing is there yet, so everything is new). --upload copies what has to be uploaded
+exist means nothing is there yet, so everything is new). When a hash differs but the zip itself
+sits beside that manifest, its contents are compared instead, so a manifest from before contents
+were hashed doesn't call every zip changed. --upload copies what has to be uploaded
 (the changed zips, with that folder's README.md and manifest.json) into DIR/<folder>/, and leaves
 DIR/<folder>/ empty when nothing changed.
 """
@@ -49,8 +52,17 @@ def build_zip(skill, out):
             info.compress_type = zipfile.ZIP_DEFLATED
             with open(f, "rb") as fh:
                 z.writestr(info, fh.read())
-    with open(out, "rb") as fh:
-        return hashlib.sha256(fh.read()).hexdigest()
+    return contents_sha(out)
+
+
+def contents_sha(path):
+    """A SHA-256 of what the zip at `path` holds: each file's name, mode and bytes, in order."""
+    h = hashlib.sha256()
+    with zipfile.ZipFile(path) as z:
+        for info in z.infolist():
+            h.update(f"{info.filename}\0{info.external_attr >> 16:o}\0".encode("utf-8"))
+            h.update(hashlib.sha256(z.read(info)).digest())
+    return h.hexdigest()
 
 
 def readme(who, skills, version):
@@ -88,13 +100,21 @@ def package(dist):
 
 
 def changed_zips(manifest, old_path):
-    """The zips in `manifest` whose SHA-256 differs from the manifest at `old_path` (or all, if
-    there is none), and the version that manifest names."""
+    """The zips in `manifest` whose contents differ from those the manifest at `old_path` describes
+    (or all, if there is none), and the version that manifest names. A hash that differs is
+    checked against the zip beside `old_path`, when there is one."""
     old = {}
     if os.path.exists(old_path):
         with open(old_path, encoding="utf-8") as f:
             old = json.load(f)
-    return [z for z, sha in manifest["zips"].items() if old.get("zips", {}).get(z) != sha], old.get("version")
+
+    def same(z, sha):
+        if old.get("zips", {}).get(z) == sha:
+            return True
+        there = os.path.join(os.path.dirname(old_path), z)
+        return z in old.get("zips", {}) and os.path.exists(there) and contents_sha(there) == sha
+
+    return [z for z, sha in manifest["zips"].items() if not same(z, sha)], old.get("version")
 
 
 def collect(dist, folder, zips, upload):

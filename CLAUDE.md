@@ -31,7 +31,7 @@ from the WFRP one.
   repo. `scripts/package-skills.py` says which skill goes where. Whenever you
   pull a `main` that changed, run
   `python scripts/package-skills.py --compare players=<the library's skills/manifest.json> --upload <dir>`.
-  It says which zips' SHA-256 changed and puts them in `<dir>/players/` with
+  It says which zips' contents changed and puts them in `<dir>/players/` with
   that folder's `README.md` and `manifest.json`: copy those to the library's
   `skills/`. Then tell the Librarian which skills changed, so the group can
   re-upload them.
@@ -39,9 +39,11 @@ from the WFRP one.
   (`.github/workflows/tests.yml`) runs them with ResourceWarning as an error,
   `sync-shared.sh --check`, the packaging, and fails a pull request that changes
   `skills/` or `shared/` without a version bump.
-- On the Librarian's Windows computer the interpreter is `python` (3.12,
-  installed for the user); `python3` there is the Microsoft Store stub and does
-  nothing. Run the `.sh` scripts from Git Bash.
+- On the Librarian's Windows computer, use Python 3.12, installed for the user
+  (`%LOCALAPPDATA%\Programs\Python\Python312\python.exe`): it has pdfplumber,
+  reportlab and Pillow. Since 2026-10 `python` and `python3` on the PATH are a
+  3.15 without them, under which the PDF tests skip or fail to import. Run the
+  `.sh` scripts from Git Bash.
 
 ## GCA on this computer
 
