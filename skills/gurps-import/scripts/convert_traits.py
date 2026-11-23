@@ -54,17 +54,21 @@ is set as that many like tables side by side, to be read one after another.
 set over two or more lines is given joined). A list's `traits` can also say:
 
   * `"line": "skill"` when the line under a name is an attribute and a difficulty ("IQ/Hard"), and
-    `"technique"` when it is a difficulty alone: read into `attribute` and `difficulty`;
+    `"technique"` when it is a difficulty alone: read into `attribute` and `difficulty`; `"spell"`
+    when it is a spell's class and what resists it ("Regular; Resisted by HT"): `class`, `resisted`;
   * `"marks": {"†": "specialties", "/TL": "tl"}` for marks printed after a name, each a
     true-or-false field (the name loses them, and `printed_name` keeps it as printed);
-  * `"labels": {"Defaults": "defaults"}` for labelled paragraphs that are fields as well as text;
+  * `"labels": {"Defaults": "defaults"}` for labelled paragraphs that are fields as well as text (a
+    label naming several, a list of fields);
   * `"starred": "self_control"` to make a field of the asterisk a list prints after some costs;
   * `"no_cost_line": true` for a list whose traits print no line of their own because the
     section's text gives one cost for all (perks), with that cost under `fields`;
   * `"name_size"` for the size its traits' names are set in, when it is not the chapter's.
 
-`--taken` gives the slugs other sources hold: a trait of the same name in the same category
-becomes a `version-of` it (docs/adr/0007).
+`--taken` (or `--library-data`, for every category index in a library-data folder) gives the slugs
+the library holds: a trait of the same name as another source's, in the same category, becomes a
+`version-of` it (docs/adr/0007); one of the same name as another chapter's of this source is an
+error until the plan's `entries` gives it a `slug` of its own.
 
 Writes OUT_DIR/<category>--<slug>.json and .md, `_records.json` (index records, each with
 `_category`) and `_report.json`: `errors` (the conversion is not to be used while there are
@@ -79,13 +83,16 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from entry_text import (blocks_from_lines, fix_case, is_table_header, mark_paragraphs, marked, plain,  # noqa: E402
-                        slugify, table_block, vocabulary, with_text_tables)
+                        slugify, table_block, vocabulary, with_keyed_lists, with_text_tables)
 from render_entry import render  # noqa: E402
 
 # fields that hold words printed on the page
-PRINTED_FIELDS = ('cost', 'types', 'see', 'attribute', 'difficulty', 'printed_name')
+PRINTED_FIELDS = ('cost', 'types', 'see', 'attribute', 'difficulty', 'printed_name', 'class', 'resisted')
 SKILL_LINE = re.compile(r'^(?P<attribute>(?:ST|DX|IQ|HT|Will|Per)(?: or (?:ST|DX|IQ|HT|Will|Per))*)/(?P<difficulty>[A-Z][A-Za-z ]+)$')
 TECHNIQUE_LINE = re.compile(r'^(?P<difficulty>Average|Hard)$')
+SPELL_CLASS = r'(?:Regular|Area|Information|Special|Missile|Melee|Blocking|Enchantment|Charm)'
+# a spell's line: its classes, then what resists it, as printed ("Regular; Resisted by HT")
+SPELL_LINE = re.compile(r'^(?P<spell_class>' + SPELL_CLASS + r'(?:; ' + SPELL_CLASS + r')*)(?:; (?P<resisted>Resist.*))?$')
 SEE = re.compile(r'^see\b', re.I)
 
 
@@ -174,6 +181,7 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None):
     def add(category, name, first, section, fields, content_lines, level, base_size, extra=None):
         where = f'{category}/{slugify(name)}'
         content_lines = with_text_tables(content_lines, report, where)
+        content_lines = with_keyed_lists(content_lines, report, where, vocab)
         blocks = blocks_from_lines(content_lines, report, where, vocab)
         for k, b in enumerate(blocks):
             # A table set in the text is read with the text round it: the paragraph before says
@@ -309,6 +317,16 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None):
                 pass
             elif SEE.match(cost):
                 fields['see'] = cost
+            elif kind_of_line == 'spell':
+                # a spell's line gives its class (or classes) and, when it can be resisted, by what
+                hit = SPELL_LINE.match(cost)
+                if not hit:
+                    report['errors'].append(f'p{page}: {name!r}: the line under its name, {cost!r}, is not a spell '
+                                            f'class (and what resists it)')
+                    continue
+                fields['class'] = hit.group('spell_class')
+                if hit.group('resisted'):
+                    fields['resisted'] = hit.group('resisted')
             elif kind_of_line in ('skill', 'technique'):
                 # a skill's line gives its controlling attribute and its difficulty ("IQ/Hard");
                 # a technique's, its difficulty alone
@@ -335,8 +353,11 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None):
                     continue
                 text = plain(b['text'])
                 label, colon, rest_of = text.partition(':')
-                if colon and label in t.get('labels', {}) and t['labels'][label] not in entry['fields']:
-                    entry['fields'][t['labels'][label]] = rest_of.strip()
+                if colon and label in t.get('labels', {}):
+                    # a label can name several fields at once ("Duration, Cost, and Time to cast")
+                    targets = t['labels'][label]
+                    for field in [targets] if isinstance(targets, str) else targets:
+                        entry['fields'].setdefault(field, rest_of.strip())
 
     for key in set(renames) - renamed:
         report['errors'].append(f'plan rename: no trait {key[1]!r} on p{key[0]}')
@@ -427,12 +448,21 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None):
         seen[ref] = e['page']
         kinds[ref] = e['fields'].get('kind')
         ep = plan.get('entries', {}).get(ref, {})
+        if ep.get('slug'):
+            e['slug'] = ep['slug']           # the plan gives it a file name of its own
         e['fields'].update(ep.get('fields', {}))
         if ep.get('relations'):
             e['relations'] = e.get('relations', []) + ep['relations']
         if ep.get('audience'):
             e['audience'] = ep['audience']
-        other = taken.get(category, {}).get(e['slug'])
+        held = taken.get(category, {}).get(e['slug'])
+        other, other_chapter = held if isinstance(held, tuple) else (held, None)
+        if other == source and other_chapter not in (None, chapter):
+            # another chapter of this book has an entry of this name in this category already
+            report['errors'].append(f'{ref} (p{e["page"]}): {source} {other_chapter} already has an entry '
+                                    f'{category}/{e["slug"]}; give this one a `slug` in the plan\'s entries '
+                                    f'(and a relation, if the two are read together)')
+            continue
         if other and other != source:
             if not any(r['to'] == ref for r in e.get('relations', [])):
                 e.setdefault('relations', []).append({'role': 'version-of', 'to': ref})
@@ -465,6 +495,7 @@ def main(argv=None):
     ap.add_argument('--plan', required=True)
     ap.add_argument('--out', required=True)
     ap.add_argument('--taken', action='append', default=[], metavar='CATEGORY=INDEX.json')
+    ap.add_argument('--library-data', help='a library-data folder: every category index in it counts as --taken')
     ap.add_argument('--dictionary', help='English words, to settle a broken word the book prints nowhere else '
                                          '(joined when the joined word is one): `english-words` for the package '
                                          'of that name, or a file with one word to a line')
@@ -479,7 +510,13 @@ def main(argv=None):
     for t in a.taken:
         category, _, path = t.partition('=')
         with open(path, encoding='utf-8') as f:
-            taken[category] = {r['slug']: r['source'] for r in json.load(f)}
+            taken[category] = {r['slug']: (r['source'], r.get('chapter')) for r in json.load(f)}
+    if a.library_data:
+        for category in sorted(os.listdir(a.library_data)):
+            path = os.path.join(a.library_data, category, '_index.json')
+            if category not in taken and os.path.exists(path):
+                with open(path, encoding='utf-8') as f:
+                    taken[category] = {r['slug']: (r['source'], r.get('chapter')) for r in json.load(f)}
     words = None
     if a.words:
         with open(a.words, encoding='utf-8') as f:

@@ -795,3 +795,51 @@ def with_text_tables(lines, report, where):
             out.append(merge_lines(headers + rows, block))
         i = j
     return out
+
+
+# --- lists keyed by a roll or a number ---------------------------------------------------------
+
+KEY = re.compile(r'^\s*(?P<key>\d+(?:\s*[-–]\s*\d+)?\+?)\s+[–—-]\s+\S')
+
+
+def with_keyed_lists(lines, report, where, vocab=None):
+    """Lines -> the same lines with each keyed list as one line carrying a list block.
+
+    A keyed list is three or more items, each starting with a number or a range of numbers and a
+    dash ("3 – Spell fails entirely.", "5-6 – Spell is cast ..."), at one left edge, their
+    following lines set in further (a hanging indent), with nothing else between them. It is the
+    way a book prints the results of a roll as running text. Each item keeps its words as
+    printed; the list is noted in the report's `keyed_lists`."""
+    def item_start(l, edge=None):
+        return (not l.get('heading') and not l.get('block') and bool(KEY.match(plain(l['text']))) and
+                (edge is None or abs(l['x0'] - edge) <= 1.5))
+
+    out, i = [], 0
+    while i < len(lines):
+        l = lines[i]
+        if not item_start(l):
+            out.append(l)
+            i += 1
+            continue
+        edge, items, j = l['x0'], [], i
+        while j < len(lines) and item_start(lines[j], edge):
+            run = [lines[j]]
+            j += 1
+            while j < len(lines) and not lines[j].get('heading') and not lines[j].get('block') and \
+                    not item_start(lines[j], edge) and lines[j]['x0'] > edge + 3 and \
+                    lines[j].get('box') == l.get('box'):
+                run.append(lines[j])
+                j += 1
+            items.append(run)
+        if len(items) < 3:
+            out.append(l)
+            i += 1
+            continue
+        texts = [join_lines([marked(x) for x in run], report, where, vocab) for run in items]
+        block = {'type': 'list', 'ordered': False, 'items': texts,
+                 'keys': [KEY.match(plain(t)).group('key') for t in texts]}
+        report.setdefault('keyed_lists', []).append({'entry': where, 'page': l['page'], 'items': len(texts),
+                                                     'keys': block['keys']})
+        out.append(merge_lines([x for run in items for x in run], block))
+        i = j
+    return out
