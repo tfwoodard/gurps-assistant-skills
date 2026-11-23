@@ -96,10 +96,17 @@ def split_items(s):
     return items
 
 
+class Vocabulary(set):
+    """The words a book prints whole, with (optionally) a `dictionary` of English words beside
+    them. The book's own words are the first evidence for how a broken word is spelt; the
+    dictionary only settles the ones the book prints nowhere else."""
+    dictionary = frozenset()
+
+
 def vocabulary(lines):
     """Every word the lines print whole (not broken at a line end), lower-cased: the evidence for
     whether a word broken across lines is hyphenated or only split."""
-    vocab = set()
+    vocab = Vocabulary()
     broken = False                    # the line before ended in a hyphen
     for l in lines:
         words = l['text'].split()
@@ -174,7 +181,22 @@ def join_lines(parts, report, where, vocab=None):
                         {'entry': where, 'text': shown, 'why': 'a figure or an abbreviation'})
                     out += p
                     continue
+                if t.lower() in ('or', 'and', 'nor'):
+                    # a hanging hyphen: "stealth-" / "or invisibility-based" is "stealth- or ..."
+                    report.setdefault('hyphens_kept', []).append(
+                        {'entry': where, 'text': out[-20:] + ' ' + p[:20], 'why': 'a hanging hyphen before a conjunction'})
+                    out += ' ' + p
+                    continue
                 whole_known, hyph_known = known(whole, vocab), known(hyph, vocab)
+                dictionary = getattr(vocab, 'dictionary', None)
+                if not whole_known and not hyph_known and dictionary and known(whole, dictionary):
+                    # The book prints neither form elsewhere, but the joined word is an English
+                    # word ("for-" / "got", "kit-" / "tens"), which a compound of two words
+                    # ("near-" / "perfect") is not.
+                    report.setdefault('dehyphenated', []).append(
+                        {'entry': where, 'from': h + '-' + t, 'to': h + t, 'why': 'an English word, by the dictionary'})
+                    out = out[:-1] + p
+                    continue
                 if hyph_known and not whole_known:
                     report.setdefault('hyphens_kept', []).append(
                         {'entry': where, 'text': shown, 'why': 'the book prints it hyphenated elsewhere'})
@@ -530,28 +552,38 @@ def block_fields(seg, labels, report, name):
 # --- tables set in the text, without rules ---------------------------------------------------
 
 ROW_LEADING = 1.35       # x the type size: lines further apart than this are not rows of one table
-COLUMN_GAP = 0.8         # x the type size: the least width of the blank between two columns
+COLUMN_GAP = 0.5         # x the type size: the least width of the blank between two columns (a word space is about a quarter)
 ALIGN_TOLERANCE = 2.5    # points: how far a column's cells may stray from its common edge or centre
+PHRASE_GAP = 0.8         # x the type size: words of a header further apart than this are different phrases
 
 
 def is_table_header(l):
-    """A text table's header: one line set wholly in bold italic at the size of the text."""
-    return (not l.get('heading') and not l.get('block') and bool(l.get('spans')) and
-            all(s['bold'] and s['italic'] for s in l['spans'] if s['text'].strip()))
+    """A line of a text table's header: set wholly in bold italic at the size of the text. Spans
+    with no letters in them (a multiplication sign from a symbol font) don't count either way."""
+    lettered = [s for s in l.get('spans') or [] if re.search(r'[^\W\d_]', s['text'])]
+    return (not l.get('heading') and not l.get('block') and bool(lettered) and
+            all(s['bold'] and s['italic'] for s in lettered))
 
 
 def read_text_table(header, rows):
-    """A header line and the row lines under it -> (columns, rows of cells, failures).
+    """Header line(s) and the row lines under them -> (columns, rows of cells, banners, failures).
 
-    The columns are the blanks that every row leaves clear: no row has a word there. The
-    header's words go to the column each stands over. `failures` says, in words, everything
-    about the table that does not check out; an empty list means it was read with nothing left
-    to doubt:
+    The columns are the blanks that every row leaves clear: no row has a word there. A header can
+    be set over several lines. Each of its phrases (words a word space apart) names the column it
+    stands over, the lines read downwards ("Self-Control" over "Number"). A phrase that reaches
+    across the blank between two columns is a banner over the columns it spans, and over any
+    unnamed columns to their right ("Wounding Multiplier" over "×2", "×3", "×4").
+
+    `failures` says, in words, everything about the table that does not check out; an empty list
+    means it was read with nothing left to doubt:
 
       * the rows leave at least one blank column between them;
-      * every row has something in every column, and so does the header;
-      * each column's cells line up: on their left edges, their right edges, or their centres."""
-    size = header['size']
+      * every row has something in every column;
+      * every column has a name in the header or stands under a banner;
+      * each column's cells line up: left edges, right edges, centres, or figures ending together."""
+    headers = header if isinstance(header, list) else [header]
+    size = headers[0]['size']
+    shown = ' / '.join(h['text'] for h in headers)
     failures = []
     left = min(l['x0'] for l in rows)
     right = max(l['x1'] for l in rows)
@@ -571,26 +603,80 @@ def read_text_table(header, rows):
                 seps.append(left + (start + k) / 2 * step)
             start = None
     if not seps:
-        return [], [], ['its rows leave no blank column between them: it reads as one column']
+        return [], [], [], ['its rows leave no blank column between them: it reads as one column']
+    ncols = len(seps) + 1
     edges = [float('-inf')] + seps + [float('inf')]
 
+    def column_of(x):
+        return next(i for i in range(ncols) if edges[i] <= x < edges[i + 1])
+
     def cells(l):
-        out = [[] for _ in range(len(seps) + 1)]
+        out = [[] for _ in range(ncols)]
         for w in l['words']:
-            mid = (w[1] + w[2]) / 2
-            out[next(i for i in range(len(seps) + 1) if edges[i] <= mid < edges[i + 1])].append(w)
+            out[column_of((w[1] + w[2]) / 2)].append(w)
         return out
 
-    head = cells(header)
-    columns = [' '.join(w[0] for w in c) for c in head]
-    if any(not c for c in columns):
-        failures.append(f'its header has no words over column {columns.index("") + 1}: {header["text"]!r}')
     grid = [cells(l) for l in rows]
+    extent = []                       # each column's cells, from their leftmost edge to their rightmost
+    for c in range(ncols):
+        ws = [w for r in grid for w in r[c]]
+        extent.append((min(w[1] for w in ws), max(w[2] for w in ws)) if ws else (edges[c], edges[c]))
+
+    # --- the header: phrases, each a column's name or a banner over several ---------------------
+    names = [[] for _ in range(ncols)]
+    banners = []
+    for h in headers:
+        phrases = []
+        for w in h['words']:
+            if phrases and w[1] - phrases[-1][-1][2] <= PHRASE_GAP * size:
+                phrases[-1].append(w)
+            else:
+                phrases.append([w])
+        for ph in phrases:
+            x0, x1 = ph[0][1], ph[-1][2]
+            text = ' '.join(w[0] for w in ph)
+            # A banner is one phrase standing over the cells of two or more columns. A name wider
+            # than its own column's cells (a long name over a column of short figures) reaches
+            # into the blank beside them, perhaps past its middle, but not over the next cells.
+            over = [c for c in range(ncols)
+                    if min(x1, extent[c][1]) - max(x0, extent[c][0]) >= 0.4 * size]
+            if len(over) >= 2:
+                # Which columns it is a banner over: a run of columns holding those it stands
+                # over, such that it is centred on the run or starts where the run starts. (Its
+                # ends may fall short of the outer columns' cells, so overlap alone can miss one.)
+                best = None
+                for a in range(over[0] + 1):
+                    for b in range(over[-1], ncols):
+                        centre = abs((x0 + x1) / 2 - (extent[a][0] + extent[b][1]) / 2)
+                        off = min(centre, abs(x0 - extent[a][0]))
+                        if best is None or (off, b - a) < best[:2]:
+                            best = (off, b - a, a, b)
+                if best[0] > size:
+                    failures.append(f'the banner {text!r} in its header is neither centred over a run of columns nor '
+                                    f'starts with one')
+                banners.append({'text': text, 'from': best[2], 'to': best[3]})
+            elif over:
+                names[over[0]].append(text)
+            else:
+                names[column_of((x0 + x1) / 2)].append(text)
+    columns = [' '.join(parts) for parts in names]
+    for b in banners:                          # a banner runs on over unnamed columns to its right
+        while b['to'] + 1 < ncols and not columns[b['to'] + 1] and \
+                not any(o is not b and o['from'] <= b['to'] + 1 <= o['to'] for o in banners):
+            b['to'] += 1
+    for c in range(ncols):
+        if not columns[c] and not any(b['from'] <= c <= b['to'] for b in banners):
+            failures.append(f'its header has no words over column {c + 1}: {shown!r}')
+    if not any(columns):
+        failures.append(f'its header names no column of its own: {shown!r}')
+    banners = [{'text': b['text'], 'columns': [b['from'] + 1, b['to'] + 1]} for b in banners]
+
+    # --- the rows ---------------------------------------------------------------------------
     out_rows = [[' '.join(w[0] for w in c) for c in r] for r in grid]
     for i, r in enumerate(out_rows):
         if any(not c for c in r):
             failures.append(f'row {i + 1} has nothing in column {r.index("") + 1}: {rows[i]["text"]!r}')
-    for c in range(len(seps) + 1):
+    for c in range(ncols):
         col = [r[c] for r in grid if r[c]]
         if len(col) < 2:
             continue
@@ -609,19 +695,47 @@ def read_text_table(header, rows):
                  if not any(abs(ways[way][k] - x) <= ALIGN_TOLERANCE for way, x in lines_.items())]
         if stray:
             texts = ', '.join(repr(' '.join(w[0] for w in col[k])) for k in stray[:4])
-            failures.append(f'in column {c + 1} ({columns[c] or "no header"}), {texts} '
+            failures.append(f'in column {c + 1} ({columns[c] or "no name"}), {texts} '
                             f'{"does" if len(stray) == 1 else "do"} not line up with the other cells')
-    return columns, out_rows, failures
+    return columns, out_rows, banners, failures
+
+
+def table_block(headers, rows, report, where):
+    """Read one text table and note it in the report's `tables`. Returns its block, or None when
+    a check failed (the failure is in the report's `errors`, and nothing is written on a guess)."""
+    columns, cells, banners, failures = read_text_table(headers, rows)
+    shown = ' / '.join(h['text'] for h in headers)
+    note = {'entry': where, 'page': headers[0]['page'], 'header': shown, 'columns': columns, 'rows': cells,
+            'failures': failures}
+    if banners:
+        note['banners'] = banners
+    report.setdefault('tables', []).append(note)
+    if failures:
+        report['errors'].append(f'{where} (p{headers[0]["page"]}): the table under {shown!r} was not read: ' +
+                                '; '.join(failures))
+        return None
+    names = [c or next((f'{b["text"]} {i + 2 - b["columns"][0]}' for b in banners
+                        if b['columns'][0] <= i + 1 <= b['columns'][1]), '') for i, c in enumerate(columns)]
+    block = {'type': 'table', 'title': '', 'columns': columns, 'rows': cells,
+             'data': table_data(names, cells, report, where)}
+    if banners:
+        block['banners'] = banners
+    return block
 
 
 def with_text_tables(lines, report, where):
     """Lines -> the same lines with each text table as one line carrying a table block.
 
-    A table is a header line (is_table_header) with two or more lines under it at the text's
-    leading, in its column, up to a wider gap. Each is read by read_text_table and listed in the
-    report's `tables` with its header, its rows and what did not check out. One that fails a
-    check is left as the lines it was and goes in the report's `errors`: no table is written on a
-    guess."""
+    A table is one or more header lines (is_table_header), one under another, with two or more
+    lines under them at the text's leading, in their column, up to a wider gap. Each is read by
+    read_text_table and listed in the report's `tables` with its header, its rows and what did
+    not check out. One that fails a check is left as the lines it was and goes in the report's
+    `errors`."""
+    def follows(nxt, prev, first):
+        return (not nxt.get('heading') and not nxt.get('block') and nxt['page'] == first['page'] and
+                nxt['column'] == first['column'] and nxt.get('box') == first.get('box') and
+                0 < nxt['baseline'] - prev['baseline'] <= ROW_LEADING * first['size'])
+
     out, i = [], 0
     while i < len(lines):
         l = lines[i]
@@ -629,29 +743,24 @@ def with_text_tables(lines, report, where):
             out.append(l)
             i += 1
             continue
-        rows, prev = [], l
-        for nxt in lines[i + 1:]:
-            if (nxt.get('heading') or nxt.get('block') or is_table_header(nxt) or nxt['page'] != l['page'] or
-                    nxt['column'] != l['column'] or nxt.get('box') != l.get('box') or
-                    not 0 < nxt['baseline'] - prev['baseline'] <= ROW_LEADING * l['size']):
-                break
-            rows.append(nxt)
-            prev = nxt
+        headers = [l]
+        j = i + 1
+        while j < len(lines) and is_table_header(lines[j]) and follows(lines[j], headers[-1], l):
+            headers.append(lines[j])
+            j += 1
+        rows, prev = [], headers[-1]
+        while j < len(lines) and not is_table_header(lines[j]) and follows(lines[j], prev, l):
+            rows.append(lines[j])
+            prev = lines[j]
+            j += 1
         if len(rows) < 2:
-            out.append(l)
-            i += 1
+            out += headers + rows
+            i = j
             continue
-        columns, cells, failures = read_text_table(l, rows)
-        note = {'entry': where, 'page': l['page'], 'header': l['text'], 'columns': columns, 'rows': cells,
-                'failures': failures}
-        report.setdefault('tables', []).append(note)
-        if failures:
-            report['errors'].append(f'{where} (p{l["page"]}): the table under {l["text"]!r} was not read: ' +
-                                    '; '.join(failures))
-            out += [l] + rows
+        block = table_block(headers, rows, report, where)
+        if block is None:
+            out += headers + rows
         else:
-            block = {'type': 'table', 'title': '', 'columns': columns, 'rows': cells,
-                     'data': table_data(columns, cells, report, where)}
-            out.append(merge_lines([l] + rows, block))
-        i += 1 + len(rows)
+            out.append(merge_lines(headers + rows, block))
+        i = j
     return out

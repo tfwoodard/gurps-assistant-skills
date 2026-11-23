@@ -187,14 +187,16 @@ class ConvertTest(unittest.TestCase):
         p.para('The gifts.')
         p.name('Far Call')
         p.cost('Variable')
-        p.para('Even the mail-', 'room clerk hears a near-', 'perfect call, mean-', 'ing yours.')
+        p.para('Even the mail-', 'room clerk hears a near-', 'perfect call, mean-', 'ing yours, at second-', 'hand.')
         plan = {'source': 'ML', 'chapter': 'ch2', 'name_size': 14.0, 'cost_size': 11.0, 'icons': [],
-                'whole_words': ['mailroom'],
+                'whole_words': ['mailroom'], 'hyphenated_words': ['second-hand'],
                 'sections': [{'heading': 'Gift List', 'page': 10, 'traits': {'category': 'advantages', 'kind': 'advantage'}}]}
         doc = {'lines': p.lines, 'regions': []}
-        entries, report = convert_traits.convert_chapter(doc, plan, None, {'mail', 'room', 'near', 'perfect', 'meaning'})
+        entries, report = convert_traits.convert_chapter(doc, plan, None, {'mail', 'room', 'near', 'perfect', 'meaning'},
+                                                         {'secondhand'})
         e = next(e for c, e in entries if e['slug'] == 'far-call')
-        self.assertEqual(e['content'][0]['text'], 'Even the mailroom clerk hears a near-perfect call, meaning yours.')
+        self.assertEqual(e['content'][0]['text'],
+                         'Even the mailroom clerk hears a near-perfect call, meaning yours, at second-hand.')
         self.assertEqual(report['questions'], [])
 
     def test_a_name_with_no_cost_and_plan_lines_that_match_nothing_are_errors(self):
@@ -273,6 +275,30 @@ class TableInTextTest(unittest.TestCase):
                          (['Reach', 'Cost'], [['1 mile', '2 points'], ['9 miles', '5 points']], ['before', 'after']))
         self.assertEqual(e['content'][2]['text'], 'Further reach doubles the cost.')
         self.assertEqual(report['table_like'], [])
+
+
+class PrintedTwiceTest(unittest.TestCase):
+    def test_a_trait_printed_twice_in_a_chapter_keeps_its_name_and_is_marked_a_reprint(self):
+        p = Page()
+        for title in ('WET KNACKS', 'DRY KNACKS'):
+            p.line(title, size=20.0, heading=2, bold=True)
+            p.para('Some knacks.')
+            p.line('Small Habit', size=11.0, heading=4, bold=True)
+            p.para('You may take a habit as a knack.')
+        knack = {'category': 'disadvantages', 'kind': 'quirk', 'no_cost_line': True, 'name_size': 11.0,
+                 'fields': {'cost': '-1 point'}}
+        plan = {'source': 'ML', 'chapter': 'ch3', 'name_size': 14.0, 'cost_size': 11.0, 'icons': [],
+                'sections': [{'heading': 'Wet Knacks', 'page': 10, 'traits': dict(knack, fields={'cost': '-1 point', 'types': ['wet']})},
+                             {'heading': 'Dry Knacks', 'page': 10, 'traits': dict(knack, fields={'cost': '-1 point', 'types': ['dry']})}],
+                'rename': [{'page': 10, 'name': 'Small Habit', 'section': 'Dry Knacks', 'slug': 'small-habit-dry',
+                            'relation': {'role': 'reprint-of', 'to': 'disadvantages/small-habit'}}]}
+        entries, report = convert_traits.convert_chapter({'lines': p.lines, 'regions': []}, plan)
+        self.assertEqual(report['errors'], [])
+        habits = {e['slug']: e for c, e in entries if e['name'] == 'Small Habit'}
+        self.assertEqual(sorted(habits), ['small-habit', 'small-habit-dry'])
+        self.assertEqual(habits['small-habit-dry']['relations'], [{'role': 'reprint-of', 'to': 'disadvantages/small-habit'}])
+        self.assertEqual((habits['small-habit']['fields']['types'], habits['small-habit-dry']['fields']['types']), (['wet'], ['dry']))
+        self.assertNotIn('printed_name', habits['small-habit-dry']['fields'])
 
 
 class NoCostLineTest(unittest.TestCase):

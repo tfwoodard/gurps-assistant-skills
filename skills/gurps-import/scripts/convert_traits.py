@@ -2,7 +2,7 @@
 """Convert a chapter of trait write-ups (advantages, disadvantages, modifiers) into entries.
 
     convert_traits.py LAYOUT.json --plan PLAN.json --out OUT_DIR [--taken CATEGORY=_index.json ...]
-                      [--words WORDS.txt]
+                      [--words WORDS.txt] [--dictionary ENGLISH.txt]
 
 LAYOUT.json is pdf_layout.py's reading of the chapter's pages, made with --boxes, with the
 book's type icons as words (--icon-text FONT:GLYPH=[word]) and its pull quotes set aside
@@ -26,7 +26,8 @@ The plan (kept in Drive beside the source, never in the repo):
      "sections": [{"heading": "Advantage List", "page": 34,
                    "traits": {"category": "advantages", "kind": "advantage"}}],
      "boxes": {"32.1": {"leave_out": "the chapter's title, printed in a frame"},
-               "46.1": {"adds_to": "advantages/damage-resistance"}},
+               "46.1": {"adds_to": "advantages/damage-resistance"},
+               "154.1": {"into": "disadvantages/short-lifespan", "under": "Some Heading"}},
      "entries": {"advantages/luck": {"relations": [...], "fields": {...}, "audience": "gm"}},
      "not_traits": [{"page": 32, "text": "Mental, Physical, and Social"}],
      "intro": {"name": "Advantages"},
@@ -34,16 +35,25 @@ The plan (kept in Drive beside the source, never in the repo):
      "leave_out_lines": [{"page": 52, "text": "GURPS", "why": "lettering in the picture"}]}
 
 `whole_words` lists words broken at a line's end that are one word, where the converter kept the
-hyphen for want of evidence (the report's `hyphens_kept` gives each such case and why).
+hyphen for want of evidence (the report's `hyphens_kept` gives each such case and why);
+`hyphenated_words` lists the ones it joined that keep their hyphen ("second-hand").
 `intro` names the entry for text printed before the chapter's first heading. `rename` gives a
 trait another name than the one printed, where two different things in one category share one
-(layout §4); the printed name stays in the entry's `fields.printed_name`. `leave_out_lines` are
+(layout §4); the printed name stays in the entry's `fields.printed_name`. Where the book prints one
+trait twice in a chapter, the second gets a `slug` and a `relation` there instead of a new name:
+{"page": 165, "name": "Minor Addiction", "section": "Physical Quirks", "slug": "minor-addiction-physical",
+ "relation": {"role": "reprint-of", "to": "disadvantages/minor-addiction"}}. `leave_out_lines` are
 single lines that are not text of the chapter.
+
+A box that is a table on a tinted panel of its own (the layout marks it `bands`) belongs to an
+entry: `into` names it, and `under` a heading in it to put the table straight after (else it goes
+at the entry's end).
 
 `sections` names only the sections that are trait lists (matched by heading and page; a heading
 set over two or more lines is given joined). A list whose traits print no cost line of their own,
 because the section's text gives one cost for all (perks), has `"no_cost_line": true` in its
-`traits`, with the cost the text states under `fields`; `"name_size"` there is the size its
+`traits`, with the cost the text states under `fields`; `"starred": "self_control"` there makes a field of
+the asterisk the list prints after some costs (true where a cost ends in one); `"name_size"` there is the size its
 traits' names are set in, when it is not the chapter's. `--taken` gives the slugs other sources hold: a
 trait of the same name in the same category becomes a `version-of` it (docs/adr/0007).
 
@@ -59,8 +69,8 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from entry_text import (blocks_from_lines, fix_case, mark_paragraphs, marked, plain, slugify,  # noqa: E402
-                        vocabulary, with_text_tables)
+from entry_text import (blocks_from_lines, fix_case, is_table_header, mark_paragraphs, marked, plain,  # noqa: E402
+                        slugify, table_block, vocabulary, with_text_tables)
 from render_entry import render  # noqa: E402
 
 PRINTED_FIELDS = ('cost', 'types', 'see')        # fields that hold words printed on the page
@@ -111,7 +121,7 @@ def table_like(l):
     return any(b[1] - a[2] > 2.5 * l['size'] for a, b in zip(ws, ws[1:]))
 
 
-def convert_chapter(layout, plan, taken=None, words=None):
+def convert_chapter(layout, plan, taken=None, words=None, dictionary=None):
     taken = taken or {}
     report = {'errors': [], 'questions': [], 'left_out': [], 'dehyphenated': [], 'table_like': [], 'tables': [],
               'printed_fields': list(PRINTED_FIELDS), 'same_name': [], 'counts': {}}
@@ -136,8 +146,11 @@ def convert_chapter(layout, plan, taken=None, words=None):
 
     def rename_key(page, name, section):
         return next((k for k in ((page, name, section.lower()), (page, name, '')) if k in renames), None)
-    vocab = vocabulary(lines) | set(words or ())     # the chapter's words, and the book's when given
-    vocab |= {w.lower() for w in plan.get('whole_words', [])}      # broken words the plan says are one word
+    vocab = vocabulary(lines)                         # the chapter's words,
+    vocab |= set(words or ())                         # the book's when given,
+    vocab |= {w.lower() for w in plan.get('whole_words', [])}      # and broken words the plan says are one word
+    vocab |= {w.lower() for w in plan.get('hyphenated_words', [])}  # or says keep their hyphen
+    vocab.dictionary = frozenset(dictionary or ())    # English words, for what the book prints nowhere else
     if plan.get('indent', True):
         mark_paragraphs(lines)
     body = [l for l in lines if not l.get('box')]
@@ -227,9 +240,15 @@ def convert_chapter(layout, plan, taken=None, words=None):
                                         f'trait\'s name, list it in the plan\'s not_traits')
                 continue
             printed_name, key = name, rename_key(page, name, title)
+            again = {}
             if key:
                 renamed.add(key)
-                name = renames[key]['to']
+                name = renames[key].get('to', name)
+                # the same trait printed a second time in the chapter: its own file, marked as what it is
+                if renames[key].get('slug'):
+                    again['slug'] = renames[key]['slug']
+                if renames[key].get('relation'):
+                    again['relations'] = [renames[key]['relation']]
             rest = [l for _, run in inner[j + 1:starts[m + 1] if m + 1 < len(starts) else len(inner)] for l in run]
             cost_lines = []
             while not t.get('no_cost_line') and rest and near(rest[0]['size'], cost_size) and rest[0].get('heading') and \
@@ -240,7 +259,7 @@ def convert_chapter(layout, plan, taken=None, words=None):
                 # trait's text ("Special Limitations") starts from the left.
                 cost_lines.append(rest.pop(0))
             fields = {'kind': t['kind']}
-            if key:
+            if key and name != printed_name:
                 fields['printed_name'] = printed_name
             if types:
                 fields['types'] = types
@@ -258,7 +277,8 @@ def convert_chapter(layout, plan, taken=None, words=None):
                                         f'trait, list it in the plan\'s not_traits')
                 continue
             else:
-                cost = ' '.join(plain(marked(l)) for l in cost_lines)
+                # as printed, its asterisk too: plain() would take that for a mark of emphasis
+                cost = ' '.join(l['text'].strip() for l in cost_lines)
             if cost is None:
                 pass
             elif SEE.match(cost):
@@ -266,9 +286,13 @@ def convert_chapter(layout, plan, taken=None, words=None):
             else:
                 fields['cost'] = cost
                 fields['leveled'] = bool(re.search(r'/\s*level', cost))
+                if t.get('starred'):
+                    # what the book's asterisk after a cost means in this list, as a field of its
+                    # own (for disadvantages: the trait takes a self-control number)
+                    fields[t['starred']] = cost.endswith('*')
             fields.update(t.get('fields', {}))
             add(t['category'], name, name_run[0], title, fields, rest, name_run[0].get('heading', level + 1),
-                t.get('name_size', name_size))
+                t.get('name_size', name_size), again)
 
     for key in set(renames) - renamed:
         report['errors'].append(f'plan rename: no trait {key[1]!r} on p{key[0]}')
@@ -288,6 +312,36 @@ def convert_chapter(layout, plan, taken=None, words=None):
             continue
         if region.get('kind') == 'table':
             report['errors'].append(f'box {bid} (p{region["page"]}) is a ruled table: this converter does not read tables yet')
+            continue
+        if region.get('bands'):
+            # A table on a tinted panel of its own, set beside or under the trait it belongs to
+            # and often wider than a column. The page does not say whose it is; the plan does.
+            target = bp.get('into')
+            owner = next((e for c, e in entries if f'{c}/{e["slug"]}' == target), None)
+            if owner is None:
+                report['errors'].append(
+                    f'box {bid} (p{region["page"]}) is a table on a panel of its own (it starts {bl[0]["text"][:40]!r}): '
+                    + (f'the plan puts it `into` {target}, which is no entry of the chapter' if target else
+                       'say which entry it belongs to with `into` in the plan\'s boxes'))
+                continue
+            k = next((i for i, l in enumerate(bl) if not is_table_header(l)), len(bl))
+            if k == 0 or len(bl) - k < 2:
+                report['errors'].append(f'box {bid} (p{region["page"]}): no header line and two rows to read as a table')
+                continue
+            block = table_block(bl[:k], bl[k:], report, target)
+            if block is None:
+                continue
+            blocks = owner['content']
+            at = len(blocks)
+            if bp.get('under'):
+                heads = [i for i, b in enumerate(blocks) if b['type'] == 'heading' and b['text'] == bp['under']]
+                if not heads:
+                    report['errors'].append(f'box {bid}: {target} has no heading {bp["under"]!r} to put the table under')
+                    continue
+                at = heads[0] + 1
+            blocks.insert(at, block)
+            block['read_with'] = [side for side, j in (('before', at - 1), ('after', at + 1))
+                                  if 0 <= j < len(blocks) and blocks[j]['type'] == 'paragraph']
             continue
         bruns = group_headings(bl, lambda l: bool(l.get('heading')))
         if bruns[0][0] != 'heading' and not bp.get('name'):
@@ -365,6 +419,9 @@ def main(argv=None):
     ap.add_argument('--plan', required=True)
     ap.add_argument('--out', required=True)
     ap.add_argument('--taken', action='append', default=[], metavar='CATEGORY=INDEX.json')
+    ap.add_argument('--dictionary', help='English words, to settle a broken word the book prints nowhere else '
+                                         '(joined when the joined word is one): `english-words` for the package '
+                                         'of that name, or a file with one word to a line')
     ap.add_argument('--words', help='the words the whole book prints (book_words.py), to settle words broken '
                                     'at a line end that the chapter alone cannot')
     a = ap.parse_args(argv)
@@ -381,7 +438,17 @@ def main(argv=None):
     if a.words:
         with open(a.words, encoding='utf-8') as f:
             words = {w.strip() for w in f if w.strip()}
-    entries, report = convert_chapter(layout, plan, taken, words)
+    dictionary = None
+    if a.dictionary == 'english-words':
+        try:
+            from english_words import get_english_words_set
+        except ImportError:
+            sys.exit('--dictionary english-words needs the english-words package: pip install english-words')
+        dictionary = get_english_words_set(['web2', 'gcide'], alpha=True, lower=True)
+    elif a.dictionary:
+        with open(a.dictionary, encoding='utf-8') as f:
+            dictionary = {w.strip().lower() for w in f if w.strip()}
+    entries, report = convert_chapter(layout, plan, taken, words, dictionary)
     os.makedirs(a.out, exist_ok=True)
     for old in os.listdir(a.out):
         if old.endswith(('.json', '.md')):
