@@ -258,7 +258,7 @@ scripts/drive_bridge.py    ledger for moving files through the claude.ai device 
 ```
 
 Run the tests with `python -m unittest discover tests`. The PDF tools need
-`pdfplumber` and `pypdf`; the tests also need `reportlab` to generate their
+`pdfplumber` and `pypdf`; converters use `english-words` when asked to (`--dictionary english-words`); the tests also need `reportlab` to generate their
 fixture PDFs.
 
 ## License

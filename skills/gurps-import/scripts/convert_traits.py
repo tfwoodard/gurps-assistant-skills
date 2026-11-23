@@ -35,7 +35,8 @@ The plan (kept in Drive beside the source, never in the repo):
      "leave_out_lines": [{"page": 52, "text": "GURPS", "why": "lettering in the picture"}]}
 
 `whole_words` lists words broken at a line's end that are one word, where the converter kept the
-hyphen for want of evidence (the report's `hyphens_kept` gives each such case and why).
+hyphen for want of evidence (the report's `hyphens_kept` gives each such case and why);
+`hyphenated_words` lists the ones it joined that keep their hyphen ("second-hand").
 `intro` names the entry for text printed before the chapter's first heading. `rename` gives a
 trait another name than the one printed, where two different things in one category share one
 (layout §4); the printed name stays in the entry's `fields.printed_name`. Where the book prints one
@@ -148,6 +149,7 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None):
     vocab = vocabulary(lines)                         # the chapter's words,
     vocab |= set(words or ())                         # the book's when given,
     vocab |= {w.lower() for w in plan.get('whole_words', [])}      # and broken words the plan says are one word
+    vocab |= {w.lower() for w in plan.get('hyphenated_words', [])}  # or says keep their hyphen
     vocab.dictionary = frozenset(dictionary or ())    # English words, for what the book prints nowhere else
     if plan.get('indent', True):
         mark_paragraphs(lines)
@@ -417,8 +419,9 @@ def main(argv=None):
     ap.add_argument('--plan', required=True)
     ap.add_argument('--out', required=True)
     ap.add_argument('--taken', action='append', default=[], metavar='CATEGORY=INDEX.json')
-    ap.add_argument('--dictionary', help='a list of English words, one to a line: settles a broken word the book '
-                                         'prints nowhere else (joined when the joined word is in the list)')
+    ap.add_argument('--dictionary', help='English words, to settle a broken word the book prints nowhere else '
+                                         '(joined when the joined word is one): `english-words` for the package '
+                                         'of that name, or a file with one word to a line')
     ap.add_argument('--words', help='the words the whole book prints (book_words.py), to settle words broken '
                                     'at a line end that the chapter alone cannot')
     a = ap.parse_args(argv)
@@ -436,7 +439,13 @@ def main(argv=None):
         with open(a.words, encoding='utf-8') as f:
             words = {w.strip() for w in f if w.strip()}
     dictionary = None
-    if a.dictionary:
+    if a.dictionary == 'english-words':
+        try:
+            from english_words import get_english_words_set
+        except ImportError:
+            sys.exit('--dictionary english-words needs the english-words package: pip install english-words')
+        dictionary = get_english_words_set(['web2', 'gcide'], alpha=True, lower=True)
+    elif a.dictionary:
         with open(a.dictionary, encoding='utf-8') as f:
             dictionary = {w.strip().lower() for w in f if w.strip()}
     entries, report = convert_chapter(layout, plan, taken, words, dictionary)
