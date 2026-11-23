@@ -81,6 +81,58 @@ class TextTableTest(unittest.TestCase):
         self.assertEqual(report['errors'], [])
         self.assertEqual(out[0]['block']['rows'][2], ['15 seconds', '-1'])
 
+    def test_a_header_set_over_several_lines_names_each_column_downwards(self):
+        lines = [line(189.0, [(70, 'Self-Control'), (150, 'Cost of')], True),
+                 line(200.0, [(78, 'Number'), (152, 'Living')], True),
+                 line(211.0, [(150, 'Increase')], True),
+                 line(222.0, [(95, '6'), right(190, '80%')]),
+                 line(233.0, [(95, '9'), right(190, '40%')]),
+                 line(244.0, [(95 - 0.5 * SIZE, '12'), right(190, '20%')])]
+        out, report = self.read(lines)
+        self.assertEqual(report['errors'], [])
+        self.assertEqual(out[0]['block']['columns'], ['Self-Control Number', 'Cost of Living Increase'])
+        self.assertEqual(out[0]['block']['rows'], [['6', '80%'], ['9', '40%'], ['12', '20%']])
+        self.assertEqual(report['tables'][0]['header'], 'Self-Control Cost of / Number Living / Increase')
+
+    def test_a_long_name_over_a_column_of_short_figures_is_its_name_not_a_banner(self):
+        lines = [line(200.0, [(60, 'Self-Control Number'), (175, 'Bonus')], True),
+                 line(211.0, [(100, '6'), right(200, '+4')]),
+                 line(222.0, [(100, '9'), right(200, '+3')])]
+        out, report = self.read(lines)
+        self.assertEqual(out[0]['block']['columns'], ['Self-Control Number', 'Bonus'])
+        self.assertNotIn('banners', out[0]['block'])
+
+    def test_a_phrase_over_several_columns_is_a_banner_over_them(self):
+        lines = [line(200.0, [(60, 'Rarity of'), (135, 'Wounding Tide Multiplier')], True),
+                 line(211.0, [(60, 'Fog'), (140, 'x2'), (185, 'x3'), (230, 'x4')], True),
+                 line(222.0, [(60, 'Rare'), (140, '-10'), (185, '-15'), (230, '-20')]),
+                 line(233.0, [(60, 'Common'), (140, '-30'), (185, '-45'), (230, '-60')])]
+        out, report = self.read(lines)
+        self.assertEqual(report['errors'], [])
+        block = out[0]['block']
+        self.assertEqual(block['columns'], ['Rarity of Fog', 'x2', 'x3', 'x4'])
+        self.assertEqual(block['banners'], [{'text': 'Wounding Tide Multiplier', 'columns': [2, 4]}])
+        self.assertEqual(block['data'][0], {'rarity_of_fog': 'Rare', 'x2': -10, 'x3': -15, 'x4': -20})
+
+    def test_a_banner_runs_on_over_unnamed_columns_which_take_their_names_from_it(self):
+        lines = [line(200.0, [(60, 'Level'), (110, 'Aging [Frequency of Rolls]')], True),
+                 line(211.0, [(60, '0'), (110, '50 years'), (200, '70 years'), (290, '90 years')]),
+                 line(222.0, [(60, '1'), (110, '25 years'), (200, '35 years'), (290, '45 years')])]
+        out, report = self.read(lines)
+        self.assertEqual(report['errors'], [])
+        block = out[0]['block']
+        self.assertEqual((block['columns'], block['banners']),
+                         (['Level', '', '', ''], [{'text': 'Aging [Frequency of Rolls]', 'columns': [2, 4]}]))
+        self.assertEqual(list(block['data'][0]), ['level', 'aging_frequency_of_rolls_1', 'aging_frequency_of_rolls_2', 'aging_frequency_of_rolls_3'])
+
+    def test_a_header_line_with_a_sign_from_another_font_is_still_a_header(self):
+        l = line(200.0, [(60, 'Fog'), (130, 'x2')], True)
+        l['spans'] = [{'text': 'Fog', 'size': SIZE, 'bold': True, 'italic': True},
+                      {'text': '×', 'size': SIZE, 'bold': False, 'italic': False},
+                      {'text': '2', 'size': SIZE, 'bold': True, 'italic': True}]
+        self.assertTrue(entry_text.is_table_header(l))
+        self.assertFalse(entry_text.is_table_header(line(200.0, [(60, 'Fog 2')])))
+
     def test_a_cell_that_lines_up_with_nothing_fails_the_table_and_leaves_its_lines(self):
         t = table([[(70, '1 mile'), right(190, '2 points')],
                    [(70, '10 miles'), right(190, '5 points')],

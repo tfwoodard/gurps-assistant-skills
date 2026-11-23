@@ -72,6 +72,21 @@ class JoinTest(unittest.TestCase):
         self.assertEqual(text, 'roll vs. IQ - Complexity to succeed')
         self.assertEqual(report['hyphens_kept'][0]['why'], 'a dash standing by itself, not a broken word')
 
+    def test_a_hanging_hyphen_before_a_conjunction_keeps_its_space(self):
+        text, report = join('hard to use near-', 'or far-reaching gifts')
+        self.assertEqual(text, 'hard to use near- or far-reaching gifts')
+        self.assertEqual(report['hyphens_kept'][0]['why'], 'a hanging hyphen before a conjunction')
+
+    def test_a_dictionary_settles_a_word_the_book_prints_nowhere_else(self):
+        vocab = entry_text.Vocabulary(VOCAB | {'for', 'got', 'kit', 'tens'})
+        self.assertEqual(join('that he for-', 'got to row', vocab)[0], 'that he for-got to row')      # two words: kept
+        vocab.dictionary = frozenset({'forgot', 'kitten'})
+        text, report = join('that he for-', 'got to row', vocab)
+        self.assertEqual(text, 'that he forgot to row')
+        self.assertEqual(report['dehyphenated'][0]['why'], 'an English word, by the dictionary')
+        self.assertEqual(join('gadgets, kit-', 'tens, and knives', vocab)[0], 'gadgets, kittens, and knives')   # by its kin
+        self.assertEqual(join('grants near-', 'perfect sight', vocab)[0], 'grants near-perfect sight')            # no such word
+
     def test_without_a_vocabulary_every_join_is_asked(self):
         text, report = join('It has mean-', 'ing here.', None)
         self.assertEqual(text, 'It has mean-ing here.')

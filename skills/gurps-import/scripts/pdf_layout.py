@@ -118,6 +118,8 @@ THIRD_SHARE = 0.2                        # ...and the least share of its words e
 SHAPE_MAX = 20                           # points: larger drawings aren't icons
 BOX_MIN = (100, 24)                      # points: a smaller image isn't a boxed panel
 RULE_MAX_WIDTH = 3.0                     # points: a thicker stroke is a band of tint, not a table's rule
+DISPLAY_HEADING = 3.0                    # x the text's size: a heading this large, alone at its height, heads the page below it
+RULE_MIN_APART = 3.0                    # points: strokes closer together than this are bands of tint too
 RUN_ON_GAP = 4.0                         # points: a word this near a box's edge is on the same line
 STANDFIRST_LINES = 8       # an opening paragraph across the page may run to this many lines
 STANDFIRST_SHARE = 0.2     # of the words under it, at least this share on each side of a gutter
@@ -517,6 +519,16 @@ def order_lines(words, gutters, page_no, height):
         for col, ws in segments(sorted(raw, key=lambda w: w['x0']), gutters):
             segs.append((b, col, ws))
     segs.sort(key=lambda s: s[0])
+    # A display heading (three times the text's size or more) that stands alone at its height,
+    # the other columns left blank beside it, heads everything below it on the page even when it
+    # is short enough to sit inside one column: it ends a band as a full-width line does.
+    sizes = sorted(max(c['size'] for c in w['chars']) for w in words)
+    usual = sizes[len(sizes) // 2] if sizes else 0
+    for k, (b, col, ws) in enumerate(segs):
+        big = max(c['size'] for w in ws for c in w['chars'])
+        if col != 'full' and gutters and usual and big >= DISPLAY_HEADING * usual and \
+                not any(o is not segs[k] and b - 0.8 * big <= o[0] <= b + 0.2 * big for o in segs):
+            segs[k] = (b, 'full', ws)
     # A full-width line ends a band; within a band, read the columns left to right.
     bounds = sorted({b for b, c, _ in segs if c == 'full'}) + [float('inf')]
     out, prev = [], float('-inf')
@@ -619,6 +631,27 @@ def find_boxes(page, page_no, notes=None):
     return sorted(set(boxes), key=lambda b: (b[1], b[0]))
 
 
+def banded_panels(page):
+    """Tables set on a panel of their own with some rows tinted: a filled rectangle, smaller than
+    the page, with thick strokes of tint lying inside it (the tinted rows). Such a table can be
+    wider than a column of the page; its rows are single lines right across it."""
+    area = page.width * page.height
+    bands = [l for l in page.lines if abs(l['top'] - l['bottom']) < 1 and (l.get('linewidth') or 0) > RULE_MAX_WIDTH]
+    out = []
+    for r in page.rects:
+        if not r.get('fill'):
+            continue
+        w, h = r['x1'] - r['x0'], r['bottom'] - r['top']
+        if w < BOX_MIN[0] or h < BOX_MIN[1] or w * h > 0.8 * area:
+            continue
+        # the bands run the panel's whole width (the page's own white ground holds bands too,
+        # those of tables set in its columns, but they are far narrower than it)
+        if any(abs(b['x0'] - r['x0']) <= 4 and abs(b['x1'] - r['x1']) <= 4 and r['top'] <= b['top'] <= r['bottom']
+               for b in bands):
+            out.append((max(0.0, r['x0']), max(0.0, r['top']), min(page.width, r['x1']), min(page.height, r['bottom'])))
+    return out
+
+
 def outermost(boxes):
     """The boxes that lie inside no other. Asked once the boxes that are no panels (text running
     over their edges) are gone, so that a panel on a backdrop outlives the backdrop."""
@@ -650,6 +683,15 @@ def read_table(page, box, lines):
     # stack of thick strokes lying edge to edge.
     hl = [l for l in page.lines if about(l) and abs(l['top'] - l['bottom']) < 1 and l['x1'] - l['x0'] > 20 and
           (l.get('linewidth') or 0) <= RULE_MAX_WIDTH]
+    # ...however thin the strokes: rules stand a line of text apart, and strokes that touch the
+    # next one (no further off than their own width, or so) are a tint laid in bands.
+    tops = sorted(l['top'] for l in hl)
+
+    def banded(l):
+        near = max(RULE_MIN_APART, 1.5 * (l.get('linewidth') or 0))
+        return any(0 < abs(t - l['top']) <= near for t in tops)
+
+    hl = [l for l in hl if not banded(l)]
     vl = [l for l in page.lines if inside(l) and abs(l['x0'] - l['x1']) < 1 and l['bottom'] - l['top'] > 6]
     bands = [r for r in page.rects if inside(r) and r['x1'] - r['x0'] > 15 and 4 < r['bottom'] - r['top'] < 60]
     rules = merge_near([l['top'] for l in hl] + [r['top'] for r in bands] + [r['bottom'] for r in bands])
@@ -862,6 +904,8 @@ def page_lines(page, page_no, icon_fonts=(), marks=None, shapes=None, regions=No
     if icon_text:
         words += icon_words(page, words, icon_text, marks_here, shapes_here, icons_alone)
     boxes = find_boxes(page, page_no, notes) if regions is not None else []
+    panels = set(banded_panels(page)) if regions is not None else set()
+    boxes = sorted(set(boxes) | panels, key=lambda b: (b[1], b[0]))
     gone = [b for b in boxes if text_runs_over(b, words, page_no, notes, (page.width, page.height))]
     within = lambda b, o: o != b and o[0] <= b[0] and o[1] <= b[1] and o[2] >= b[2] and o[3] >= b[3]
     holds = lambda b: any(b[0] <= (w['x0'] + w['x1']) / 2 <= b[2] and b[1] <= (w['top'] + w['bottom']) / 2 <= b[3]
@@ -913,7 +957,9 @@ def page_lines(page, page_no, icon_fonts=(), marks=None, shapes=None, regions=No
             continue
         bid = f'{page_no}.{i + 1}'
         # A box is one or two columns; a table's columns inside it are not text columns.
-        bl = order_lines(bw, find_gutters(bw, box[2] - box[0], box[0], three=False), page_no, page.height)
+        # ...and a table on a tinted panel has no text columns at all: each row is one line.
+        inner = () if box in panels else find_gutters(bw, box[2] - box[0], box[0], three=False)
+        bl = order_lines(bw, inner, page_no, page.height)
         parts = titled_tables(page, box, bl)
         for k, (sub, sl) in enumerate(parts):
             sid = bid if len(parts) == 1 else f'{bid}.{k + 1}'
@@ -926,6 +972,8 @@ def page_lines(page, page_no, icon_fonts=(), marks=None, shapes=None, regions=No
                         l['top'] >= page.height * MARGIN_TOP):
                     l['furniture'] = False
             region = {'id': sid, 'kind': 'box', 'page': page_no, 'bbox': [round(v, 1) for v in sub]}
+            if box in panels:
+                region['bands'] = True        # a table with tinted rows: its lines are its rows
             table = read_table(page, sub, sl)
             if table:
                 for l in sl:

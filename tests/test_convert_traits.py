@@ -275,6 +275,30 @@ class TableInTextTest(unittest.TestCase):
         self.assertEqual(report['table_like'], [])
 
 
+class PrintedTwiceTest(unittest.TestCase):
+    def test_a_trait_printed_twice_in_a_chapter_keeps_its_name_and_is_marked_a_reprint(self):
+        p = Page()
+        for title in ('WET KNACKS', 'DRY KNACKS'):
+            p.line(title, size=20.0, heading=2, bold=True)
+            p.para('Some knacks.')
+            p.line('Small Habit', size=11.0, heading=4, bold=True)
+            p.para('You may take a habit as a knack.')
+        knack = {'category': 'disadvantages', 'kind': 'quirk', 'no_cost_line': True, 'name_size': 11.0,
+                 'fields': {'cost': '-1 point'}}
+        plan = {'source': 'ML', 'chapter': 'ch3', 'name_size': 14.0, 'cost_size': 11.0, 'icons': [],
+                'sections': [{'heading': 'Wet Knacks', 'page': 10, 'traits': dict(knack, fields={'cost': '-1 point', 'types': ['wet']})},
+                             {'heading': 'Dry Knacks', 'page': 10, 'traits': dict(knack, fields={'cost': '-1 point', 'types': ['dry']})}],
+                'rename': [{'page': 10, 'name': 'Small Habit', 'section': 'Dry Knacks', 'slug': 'small-habit-dry',
+                            'relation': {'role': 'reprint-of', 'to': 'disadvantages/small-habit'}}]}
+        entries, report = convert_traits.convert_chapter({'lines': p.lines, 'regions': []}, plan)
+        self.assertEqual(report['errors'], [])
+        habits = {e['slug']: e for c, e in entries if e['name'] == 'Small Habit'}
+        self.assertEqual(sorted(habits), ['small-habit', 'small-habit-dry'])
+        self.assertEqual(habits['small-habit-dry']['relations'], [{'role': 'reprint-of', 'to': 'disadvantages/small-habit'}])
+        self.assertEqual((habits['small-habit']['fields']['types'], habits['small-habit-dry']['fields']['types']), (['wet'], ['dry']))
+        self.assertNotIn('printed_name', habits['small-habit-dry']['fields'])
+
+
 class NoCostLineTest(unittest.TestCase):
     def test_a_list_whose_text_gives_one_cost_for_all_takes_it_from_the_plan(self):
         p = Page()

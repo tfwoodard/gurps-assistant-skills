@@ -236,6 +236,7 @@ skills/gurps-import/scripts/convert_traits.py  trait write-ups (advantages, modi
 skills/gurps-import/scripts/book_words.py      the words a book prints whole, to settle words broken at a line end
 skills/gurps-import/scripts/open_page.py       open a source's PDF at a printed page, to check an import against it
 skills/gurps-import/scripts/pdf_outline.py     PDF bookmarks -> chapter list with printed pages
+skills/gurps-import/scripts/read_chapter.py    read a chapter's pages with the options its plan records
 skills/gurps-import/scripts/pdf_layout.py      PDF pages -> lines (by baseline and column) with style, boxes
 skills/gurps-import/scripts/entry_text.py      text helpers for converters (styles, hyphens, lists, table data)
 skills/gurps-import/scripts/render_entry.py    entry .json -> Markdown

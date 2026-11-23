@@ -83,19 +83,34 @@ Librarian's computer with the folder connected (copy the PDF into scratch with
 the device tools). If neither is available, say so and stop. Never copy the
 PDF or anything read from it into the repo.
 
-1. Read the chapter's pages by layout into scratch:
+1. Read the chapter's pages by layout into scratch. A chapter that has a plan
+   is read with the options the plan records under `layout`:
 
    ```
-   python scripts/pdf_layout.py BOOK.pdf --pages 32-118 --page-offset 0 --out scratch/ch2-layout.json
-   python scripts/pdf_layout.py BOOK.pdf --pages 43 --page-offset 0 --text    # look at a page
+   python scripts/read_chapter.py "<library>/sources/B/plans/ch2.json" --library <library> --out scratch/ch2-layout.json
+   ```
+
+   For a first look at a new book, call the reader directly:
+
+   ```
+   python scripts/pdf_layout.py BOOK.pdf --pages 32-118 --page-offset 2 --out scratch/ch2-layout.json
+   python scripts/pdf_layout.py BOOK.pdf --pages 43 --page-offset 2 --text    # look at a page
    ```
 
    It orders each page's lines by column, marks page furniture (running heads,
    page numbers) and gives heading levels from type size. `--boxes` finds boxed
-   panels and ruled tables. `check_coverage.py` prints every line set aside as
-   `page furniture`: read them each time, because a body line there is a fault
-   to fix, not a line to leave out. If it reports pages with no text layer,
-   look at the page images and ask before running OCR.
+   panels, ruled tables, and tables set on a tinted panel of their own.
+   `check_coverage.py` prints every line set aside as `page furniture`: read
+   them each time, because a body line there is a fault to fix, not a line to
+   leave out. If it reports pages with no text layer, look at the page images
+   and ask before running OCR. Things to look for in a new book, each of which
+   has an option once found:
+   - its type icons (`--icon-fonts`, `--icon-text`, `--icons-alone`);
+   - pull quotes, which repeat the text in a face of their own (`--aside-fonts`);
+   - a character its fonts give wrongly: list the chapter's non-ASCII characters
+     once (`--replace-chars`);
+   - `gutter_notes`: pages read with the book's usual columns because a picture
+     or panel hid one.
 2. Check it's the chapter it should be: its first heading matches the chapter
    list. If not, say so and stop.
 3. Look at a few pages with `--text` and at the page images where the layout is
@@ -114,7 +129,7 @@ PDF or anything read from it into the repo.
 
    | Kind | Script | Plan says |
    |---|---|---|
-   | Trait write-ups (advantages, disadvantages, perks, quirks, enhancements and limitations): a name with its type icons, a cost line under it, then text | `convert_traits.py` | the type sizes of a trait's name and of its cost line (`name_size`, `cost_size`); the icon words; the `sections` that are lists of traits, by heading and page, with their category and kind (every other section becomes a `rules` entry, and so does each box); `intro` (a name for text before the first heading); `boxes` (`leave_out` with the reason, or `adds_to` an entry, or a `name`); `rename` for two different traits of one name in one category; `not_traits` and `leave_out_lines` for name-sized lines that aren't traits; `entries` for an entry's relations, extra fields or audience. Traits are found by their headings, not listed: a name with no cost line under it is an error. Read the pages with `--boxes`, the book's type icons as words (`--icon-fonts`, `--icon-text FONT:GLYPH=[word]`, `--icons-alone`), its pull quotes set aside (`--aside-fonts FONT@SIZE`) and any character its fonts give wrongly put right (`--replace-chars READ=PRINTED`: the Basic Set's multiplication sign reads as a yen sign; list the chapter's non-ASCII characters once to find these); the plan's `layout` records the options used. Check the layout's `gutter_notes` (pages read with the book's usual columns) and the report's `tables` (every table set in a trait's text, read and checked: see **Tables** below), `table_like` (lines spaced like table rows that were not read as one), and how it settled the words broken at a line's end: `dehyphenated` and `hyphens_kept`, each with why. Give it the book's word list (`--words`, made once per book with `book_words.py BOOK.pdf --out sources/<code>/plans/words.txt`); read the `hyphens_kept` whose reason is "both halves are words, and the book prints neither form elsewhere" (the one case decided without evidence) and put the ones that are one word in the plan's `whole_words`. |
+   | Trait write-ups (advantages, disadvantages, perks, quirks, enhancements and limitations): a name with its type icons, a cost line under it, then text | `convert_traits.py` | the type sizes of a trait's name and of its cost line (`name_size`, `cost_size`); the icon words; the `sections` that are lists of traits, by heading and page, with their category and kind (every other section becomes a `rules` entry, and so does each box); `intro` (a name for text before the first heading); `boxes` (`leave_out` with the reason, or `adds_to` an entry, or a `name`); `into` (and `under`) for a table on a tinted panel, naming the entry it belongs to; `rename` for two different traits of one name in one category, or (with `slug` and `relation`) for one trait the book prints twice; `starred` to make a field of the asterisk after a cost; `no_cost_line` and `name_size` for a list whose traits print no cost (perks, quirks); `not_traits` and `leave_out_lines` for name-sized lines that aren't traits; `entries` for an entry's relations, extra fields or audience. Traits are found by their headings, not listed: a name with no cost line under it is an error. Read the pages with `--boxes`, the book's type icons as words (`--icon-fonts`, `--icon-text FONT:GLYPH=[word]`, `--icons-alone`), its pull quotes set aside (`--aside-fonts FONT@SIZE`) and any character its fonts give wrongly put right (`--replace-chars READ=PRINTED`: the Basic Set's multiplication sign reads as a yen sign; list the chapter's non-ASCII characters once to find these); the plan's `layout` records the options used. Check the layout's `gutter_notes` (pages read with the book's usual columns) and the report's `tables` (every table set in a trait's text, read and checked: see **Tables** below), `table_like` (lines spaced like table rows that were not read as one), and how it settled the words broken at a line's end: `dehyphenated` and `hyphens_kept`, each with why. Give it the book's word list (`--words`, made once per book with `book_words.py BOOK.pdf --out sources/<code>/plans/words.txt`); read the `hyphens_kept` whose reason is "both halves are words, and the book prints neither form elsewhere" (the one case decided without evidence) and put the ones that are one word in the plan's `whole_words`. |
 
    A chapter of another kind needs a converter built first: a script that
    reads the layout JSON and a plan and writes each entry's `.json` and `.md`
@@ -237,8 +252,10 @@ memory.
   every word, shown, and noted in the chapter's notes.
 
 Readers so far: `entry_text.with_text_tables` (a table set in the text without
-rules: a bold-italic header line, then rows; `convert_traits.py` uses it) and
-`pdf_layout.py --boxes` (a ruled table in a box, not yet used by a converter).
+rules: one or more bold-italic header lines, then rows; a header phrase over
+several columns is a banner; `convert_traits.py` uses it, for tables in the
+columns and for those on a tinted panel of their own) and `pdf_layout.py
+--boxes` (a ruled table in a box, not yet used by a converter).
 
 To correct an entry's fields or relations after an import, use
 `scripts/edit_entry.py --library <root> <category>/<slug> --set FIELD=VALUE

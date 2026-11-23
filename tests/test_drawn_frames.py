@@ -21,7 +21,7 @@ except ImportError:  # pragma: no cover
 SCRIPTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'skills', 'gurps-import', 'scripts')
 
 
-def draw_page(path):
+def draw_page(path, band=6.5):
     """Two columns of body text, and under them a panel across the page: a tint of thick strokes
     laid edge to edge, an eight-sided outline round it, a title and two columns of text in it."""
     c = canvas.Canvas(path, pagesize=A4)
@@ -31,10 +31,10 @@ def draw_page(path):
         c.drawString(60, h - 100 - 11 * k, 'Keepers trim the wicks at dusk.')
         c.drawString(310, h - 100 - 11 * k, 'Gulls circle the tower all day.')
     x0, x1, top, bottom = 60, 540, h - 300, h - 480
-    c.setLineWidth(6.5)
-    for k in range(28):                                      # the tint: thick strokes, edge to edge
-        c.setStrokeColorRGB(0.75 + 0.005 * k, 0.84, 0.92)
-        y = top - 4 - 6.4 * k
+    c.setLineWidth(band)
+    for k in range(int(178 / band)):                         # the tint: strokes laid edge to edge
+        c.setStrokeColorRGB(0.75 + 0.001 * k, 0.84, 0.92)
+        y = top - 4 - band * 0.98 * k
         c.line(x0 + 6, y, x1 - 6, y)
     c.setLineWidth(1)
     c.setStrokeColorRGB(0, 0.47, 0.7)
@@ -59,11 +59,13 @@ def draw_page(path):
 
 @unittest.skipUnless(HAVE_LIBS, 'reportlab is needed to draw the fixture PDF')
 class DrawnFrameTest(unittest.TestCase):
+    band = 6.5                       # the width of each stroke of the tint
+
     @classmethod
     def setUpClass(cls):
         with tempfile.TemporaryDirectory() as d:
             pdf, out = os.path.join(d, 'page.pdf'), os.path.join(d, 'layout.json')
-            draw_page(pdf)
+            draw_page(pdf, cls.band)
             r = subprocess.run([sys.executable, os.path.join(SCRIPTS, 'pdf_layout.py'), pdf, '--pages', '1',
                                 '--boxes', '--out', out], capture_output=True, text=True)
             assert r.returncode == 0, r.stderr
@@ -80,6 +82,11 @@ class DrawnFrameTest(unittest.TestCase):
         self.assertEqual(len(boxed), 17)
         outside = {l['text'] for l in self.doc['lines'] if not l.get('box')}
         self.assertEqual(outside, {'Keepers trim the wicks at dusk.', 'Gulls circle the tower all day.'})
+
+
+class ThinBandsTest(DrawnFrameTest):
+    """The same panel with its tint laid in strokes as thin as a rule: still a tint, not a table."""
+    band = 2.4
 
 
 if __name__ == '__main__':
