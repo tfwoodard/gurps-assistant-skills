@@ -309,8 +309,8 @@ def mark_paragraphs(lines):
             l['para'] = False
         if prev is None and hang and hang[0] != group(l) and not starts_with_label(l) and \
                 INDENT[0] <= l['x0'] - edge[group(l)] <= INDENT[1]:
-            # A hanging labelled line carried over a column or page turn ("HP 12 [0]; Will" / "11
-            # [0]; Per 11 ..."), a box's lines perhaps between them in reading order: the line it
+            # A hanging labelled line carried over a column or page turn ("Lamps 3 [6]; Oil" / "2
+            # [4]; Wicks 5 [0]"), a box's lines perhaps between them in reading order: the line it
             # carries on from, the last one outside a box, hung under the label.
             last = next((b for b in reversed(body[:i]) if b.get('box') == l.get('box')), None)
             if last is not None and group(last) == hang[0] and last['x0'] > hang[1] + INDENT[0] - 1 and \
