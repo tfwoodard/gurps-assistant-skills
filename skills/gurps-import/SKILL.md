@@ -270,7 +270,9 @@ memory.
 
 Readers so far: `entry_text.with_text_tables` (a table set in the text without
 rules: one or more bold-italic header lines, then rows; a header phrase over
-several columns is a banner; `convert_traits.py` uses it, for tables in the
+several columns is a banner; a last column set flush right, whose long cells
+leave no blank down the table, is read row by row after each row's wide gap;
+`convert_traits.py` uses it, for tables in the
 columns and for those on a tinted panel of their own) and `pdf_layout.py
 --boxes` (a ruled table in a box, not yet used by a converter).
 

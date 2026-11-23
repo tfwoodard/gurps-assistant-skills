@@ -97,6 +97,41 @@ class KeyedListAcrossColumnsTest(unittest.TestCase):
                                                     '3 – A forge: melts iron.'])
 
 
+class FlushRightColumnTest(unittest.TestCase):
+    """A two-column table whose second column is set flush right, one long chore reaching past
+    where a long time begins, so no blank runs down the table."""
+
+    def lines(self):
+        return table([[(60, 'Bake a loaf of bread'), right(300, '1 hr.')],
+                      [(60, 'Darn a sock'), right(300, '10 min.')],
+                      [(60, 'Sweep the whole of the long front hall'), right(300, '2 min.')],
+                      [(60, 'Air a room'), right(300, '5 min. per window (more if')],
+                      [right(300, 'it is windy)')],
+                      [(60, 'Find a lost thimble in a sewing basket,')],
+                      [(68, 'if it is there'), right(300, '2d seconds')]],
+                     [(60, 'Chore'), right(300, 'Time')])
+
+    def test_each_rows_last_cell_is_read_after_its_wide_gap(self):
+        report = {'errors': [], 'questions': []}
+        out = entry_text.with_text_tables(self.lines(), report, 'rules/chores')
+        self.assertEqual(report['errors'], [])
+        self.assertEqual(len(out), 1)
+        block = out[0]['block']
+        self.assertEqual(block['columns'], ['Chore', 'Time'])
+        self.assertEqual(block['rows'], [['Bake a loaf of bread', '1 hr.'], ['Darn a sock', '10 min.'],
+                                         ['Sweep the whole of the long front hall', '2 min.'],
+                                         ['Air a room', '5 min. per window (more if it is windy)'],
+                                         ['Find a lost thimble in a sewing basket, if it is there', '2d seconds']])
+
+    def test_a_line_that_runs_full_width_from_the_left_is_prose_and_no_such_table(self):
+        lines = self.lines()
+        lines[3] = line(lines[3]['baseline'], [(60, 'Sweep the whole of the long front hall and the stairs')])
+        lines[3]['words'][-1][2] = 300.0                     # justified out to the right edge
+        columns, _, _, failures = entry_text.read_text_table(lines[:1], lines[1:])
+        self.assertEqual(columns, [])
+        self.assertIn('it reads as one column', failures[0])
+
+
 class TextTableTest(unittest.TestCase):
     def read(self, lines):
         report = {'errors': [], 'questions': []}
