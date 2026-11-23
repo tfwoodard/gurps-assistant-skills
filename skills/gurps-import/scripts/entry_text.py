@@ -709,7 +709,7 @@ def read_text_table(header, rows):
                     part = ph[starts[k]:starts[k + 1] if k + 1 < len(over) else len(ph)]
                     spans.append((part, part[0][1], part[-1][2], [c]))
                 continue
-            # ...and so are names each centred on its own column ("None (0) Light (1) Medium (2)"
+            # ...and so are names each centred on its own column ("Calm (0) Wind (1) Gale (2)"
             # over four columns of figures), on a header's last line (a phrase on a line above
             # the names is a banner over them): each word goes to the column whose cells' middle
             # is nearest, and every part must be centred on its column.
@@ -760,11 +760,11 @@ def read_text_table(header, rows):
         if best is not None:
             banners.append({'text': text, 'from': best[2], 'to': best[3]})
     # A phrase over one column's cells, on a line of a header that names each column again on a
-    # line below, is a banner when it is centred on a run of those columns ("Weight Range by
-    # Build" over Skinny ... Very Fat): it only overlaps the middle one. Centred, that is, on
+    # line below, is a banner when it is centred on a run of those columns ("Weight by
+    # Build" over Thin ... Fat): it only overlaps the middle one. Centred, that is, on
     # those names: a name over its own column can happen to sit centred on a run's cells.
     # And it reaches past its own column's names below on both sides, as a name's first line
-    # ("Cost of" over "Living" / "Increase") does not.
+    # ("Oil per" over "Night" / "Burned") does not.
     for li, name, mid, c in single:
         below = [n for n in names[c] if n[0] > li]
         if not below or not (name[2] < min(n[2] for n in below) - 1 and name[3] > max(n[3] for n in below) + 1):
@@ -790,8 +790,27 @@ def read_text_table(header, rows):
 
     # --- the rows ---------------------------------------------------------------------------
     # A line with nothing in the first column, under a row, carries on that row's cells (a cell
-    # too long for its column: "special – see" / "the notes"). Its words join the row's; only a
+    # too long for its column: "see the" / "notes below"). Its words join the row's; only a
     # row's first line is held to the alignment check.
+    # A line with nothing but its first column, straight over a full row, is the first line of
+    # that row's name, set over two lines with the cells on its last ("Rope ladder" / "(no
+    # gloves) 2 feet ..."), when the second reads on from it (a small letter or a
+    # bracket starts it, or the first breaks off at a hyphen or comma); else a cell is missing.
+    def reads_on(first, second):
+        return bool(re.match(r'[a-z(\[]', second[0][0])) or first[-1][0].endswith(('-', ','))
+
+    g2, r2, k = [], [], 0
+    while k < len(grid):
+        r = grid[k]
+        if r[0] and not any(r[1:]) and k + 1 < len(grid) and all(grid[k + 1]) and reads_on(r[0], grid[k + 1][0]):
+            g2.append([r[0] + grid[k + 1][0]] + [list(c) for c in grid[k + 1][1:]])
+            r2.append(dict(rows[k], text=rows[k]['text'] + ' ' + rows[k + 1]['text']))
+            k += 2
+        else:
+            g2.append(r)
+            r2.append(rows[k])
+            k += 1
+    grid, rows = g2, r2
     first_lines, merged = [], []
     for r, l in zip(grid, rows):
         if merged and not r[0] and any(r[1:]):
@@ -906,6 +925,14 @@ def with_text_tables(lines, report, where):
             out += headers + rows
             i = j
             continue
+        if not read_text_table(headers, rows)[0]:
+            # Lines under a bold-italic line that leave no blank column between them are prose (a
+            # book's title set in bold italics at a line's start), not a table: listed, not read.
+            report.setdefault('not_tables', []).append({'entry': where, 'page': l['page'], 'text': l['text'],
+                                                        'why': 'the lines under it read as one column'})
+            out += headers + rows
+            i = j
+            continue
         block = table_block(headers, rows, report, where)
         if block is None:
             out += headers + rows
@@ -917,7 +944,7 @@ def with_text_tables(lines, report, where):
 
 # --- lists keyed by a roll or a number ---------------------------------------------------------
 
-KEY = re.compile(r'^\s*(?P<key>\d+(?:\s*[-–]\s*\d+)?\+?)\s+[–—-]\s+\S')
+KEY = re.compile(r'^\s*(?P<key>\d+(?:\s*[-–]\s*\d+|(?:\s*,\s*\d+)+)?\+?)\s+[–—-]\s+\S')   # "3", "5-6", "14, 15", "40+"
 
 
 def with_keyed_lists(lines, report, where, vocab=None):
@@ -951,7 +978,10 @@ def with_keyed_lists(lines, report, where, vocab=None):
             edge = edges[where_(lines[j])]
             run = [lines[j]]
             j += 1
-            while j < len(lines) and not lines[j].get('heading') and not lines[j].get('block') and                     where_(lines[j]) == where_(run[0]) and not item_start(lines[j], edges) and                     (lines[j]['x0'] > edge + 3 or ('para' in lines[j] and not lines[j]['para'])):
+            # (an item's later lines: set in further, or running on as the paragraph reader says,
+            # into the next column or page too, where the item carries over the turn)
+            while j < len(lines) and not lines[j].get('heading') and not lines[j].get('block') and                     not item_start(lines[j], edges) and lines[j].get('box') == l.get('box') and                     ((where_(lines[j]) == where_(run[0]) and lines[j]['x0'] > edge + 3) or
+                     ('para' in lines[j] and not lines[j]['para'])):
                 run.append(lines[j])
                 j += 1
             items.append(run)

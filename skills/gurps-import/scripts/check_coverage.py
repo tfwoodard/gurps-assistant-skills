@@ -34,8 +34,8 @@ SKIP_KEYS = {'slug', 'source', 'chapter', 'section', 'page', 'level', 'type', 'i
 def words(s):
     """Lower-cased words, split at hyphens too, so a word hyphenated across two lines on the
     page ("tried-" / "and-tested") counts the same as the joined word ("tried-and-tested"),
-    and at plus signs, so a word joined across a line end with a figure after it ("attrib-" /
-    "ute+10") counts the same as its joined form."""
+    and at plus signs, so a word joined across a line end with a figure after it ("wick-" /
+    "length+2") counts the same as its joined form."""
     s = re.sub(r'\*+', ' ', s).replace('\u00ad', '').lower()
     out = []
     for w in WORD.findall(s):

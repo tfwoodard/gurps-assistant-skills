@@ -61,6 +61,23 @@ class KeyedListTest(unittest.TestCase):
         self.assertEqual(entry_text.with_keyed_lists(lines, report, 'rules/lamps'), lines)
 
 
+class KeyedListKeysAndTurnsTest(unittest.TestCase):
+    def test_keys_of_several_numbers_and_an_item_running_on_over_a_column_turn(self):
+        def item(y, x, text, para, column='left'):
+            l = line(y, [(x, text)], column=column)
+            l['para'] = para
+            return l
+        lines = [item(201.0, 60, '3 – The lamp goes out.', True),
+                 item(212.0, 60, '4, 5 – The lamp gutters and', True),
+                 item(80.0, 240, 'smokes.', False, 'right'),
+                 item(91.0, 240, '6 – Nothing happens.', True, 'right')]
+        report = {'errors': [], 'questions': []}
+        out = entry_text.with_keyed_lists(lines, report, 'rules/lamps')
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]['block']['keys'], ['3', '4, 5', '6'])
+        self.assertEqual(out[0]['block']['items'][1], '4, 5 – The lamp gutters and smokes.')
+
+
 class KeyedListAcrossColumnsTest(unittest.TestCase):
     def test_a_keyed_list_set_as_paragraphs_carries_on_into_the_next_column(self):
         def item(y, x, text, para):
@@ -255,7 +272,7 @@ class TextTableTest(unittest.TestCase):
         self.assertIn("in column 2 (Cost), '10 points' does not line up with the other cells", report['errors'][0])
         self.assertEqual(len(report['tables'][0]['failures']), 1)
 
-    def test_a_row_with_an_empty_cell_and_rows_with_no_blank_between_columns_fail(self):
+    def test_a_row_with_an_empty_cell_fails_and_lines_with_no_blank_between_columns_are_text(self):
         t = table([[(70, '1 mile'), right(190, '2 points')],
                    [(70, '10 miles')],
                    [(70, '100 miles'), right(190, '10 points')]],
@@ -263,8 +280,11 @@ class TextTableTest(unittest.TestCase):
         _, report = self.read(t)
         self.assertIn("row 2 has nothing in column 2: '10 miles'", report['errors'][0])
         t = table([[(70, 'one two three four')], [(70, 'five six seven eight')]], [(70, 'Reach'), (160, 'Cost')])
-        _, report = self.read(t)
-        self.assertIn('its rows leave no blank column between them', report['errors'][0])
+        out, report = self.read(t)
+        self.assertEqual(report['errors'], [])
+        self.assertEqual(len(out), 3)
+        self.assertEqual(report['not_tables'], [{'entry': 'advantages/tide-sense', 'page': 10, 'text': 'Reach Cost',
+                                                 'why': 'the lines under it read as one column'}])
 
     def test_a_cell_carried_onto_a_second_line_joins_its_row(self):
         t = table([[(70, 'cut'), (130, 'cutting')],
@@ -275,6 +295,16 @@ class TextTableTest(unittest.TestCase):
         out, report = self.read(t)
         self.assertEqual(report['errors'], [])
         self.assertEqual(out[0]['block']['rows'], [['cut', 'cutting'], ['spec.', 'special – see the notes'], ['tox', 'toxic']])
+
+    def test_a_name_set_over_two_lines_with_its_cells_on_the_second_is_one_row(self):
+        t = table([[(70, 'Ladder'), right(190, '1 rung')],
+                   [(70, 'Rope-down')],
+                   [(70, '(no gloves)'), right(190, '2 feet')],
+                   [(70, 'Wall'), right(190, '1 foot')]],
+                  [(70, 'Climb'), (160, 'Pace')])
+        out, report = self.read(t)
+        self.assertEqual(report['errors'], [])
+        self.assertEqual(out[0]['block']['rows'], [['Ladder', '1 rung'], ['Rope-down (no gloves)', '2 feet'], ['Wall', '1 foot']])
 
     def test_a_header_with_no_words_over_a_column_fails(self):
         t = table([[(70, '1 mile'), right(190, '2 points')], [(70, '10 miles'), right(190, '5 points')]],
