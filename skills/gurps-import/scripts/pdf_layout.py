@@ -1307,7 +1307,8 @@ def read(pdf_path, first, last, offset, icon_fonts=(), boxes=False, icon_text=No
         # (a panel or a picture fills most of a column, so too few words stand in it to count)
         # is read again with the usual ones, where its own words leave them clear.
         counts = collections.Counter(len(r['gutters']) for r in pages.values())
-        most = counts.most_common(1)[0][0] if counts else 0
+        # on a tie, the more columns: a page can hide a gutter, never show one it lacks
+        most = max(counts, key=lambda k: (counts[k], k)) if counts else 0
         gutter_notes = []
         if usual_gutters:
             # given (--usual-gutters): a chapter too short to show them on most of its pages

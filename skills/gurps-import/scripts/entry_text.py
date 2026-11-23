@@ -307,6 +307,16 @@ def mark_paragraphs(lines):
                              re.search(r'[;,]\**$', plain(before['text']).rstrip()))
         else:
             l['para'] = False
+        if prev is None and hang and hang[0] != group(l) and not starts_with_label(l) and \
+                INDENT[0] <= l['x0'] - edge[group(l)] <= INDENT[1]:
+            # A hanging labelled line carried over a column or page turn ("HP 12 [0]; Will" / "11
+            # [0]; Per 11 ..."), a box's lines perhaps between them in reading order: the line it
+            # carries on from, the last one outside a box, hung under the label.
+            last = next((b for b in reversed(body[:i]) if b.get('box') == l.get('box')), None)
+            if last is not None and group(last) == hang[0] and last['x0'] > hang[1] + INDENT[0] - 1 and \
+                    not SENTENCE_END.search(plain(last['text'])):
+                l['para'] = False
+                hang = (group(l), edge[group(l)])
         if hang and hang[0] == group(l) and l['x0'] > hang[1] + INDENT[0] - 1 and not starts_with_label(l):
             l['para'] = False                      # a line hanging under a flush labelled line
         elif not l['para'] and ended and starts_with_label(l):
@@ -314,6 +324,8 @@ def mark_paragraphs(lines):
             l['para'] = True
         if starts_with_label(l) and l['para'] and abs(l['x0'] - edge[group(l)]) < 1.5:
             hang = (group(l), l['x0'])
+        elif hang and l.get('box') != hang[0][2]:
+            pass                                   # a box's lines between: the hang waits for the text
         elif l['para'] or not hang or hang[0] != group(l) or l['x0'] <= hang[1] + 1:
             hang = None
     return lines
