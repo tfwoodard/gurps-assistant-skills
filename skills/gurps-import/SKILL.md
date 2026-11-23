@@ -108,7 +108,10 @@ PDF or anything read from it into the repo.
    - its type icons (`--icon-fonts`, `--icon-text`, `--icons-alone`);
    - pull quotes, which repeat the text in a face of their own (`--aside-fonts`);
    - a character its fonts give wrongly: list the chapter's non-ASCII characters
-     once (`--replace-chars`);
+     once (`--replace-chars`). A glyph a font gives no character for reads
+     "(cid:129)"; the layout lists each in `unmapped_glyphs`, and the coverage
+     check (so `write_chapter.py`) refuses the chapter until `--replace-chars`
+     says what the page prints there (`(cid:129)=•`);
    - `gutter_notes`: pages read with the book's usual columns because a picture
      or panel hid one.
    - a frame that is no panel (drawn round a picture that text runs past): a box
@@ -272,6 +275,8 @@ Readers so far: `entry_text.with_text_tables` (a table set in the text without
 rules: one or more bold-italic header lines, then rows; a header phrase over
 several columns is a banner; a last column set flush right, whose long cells
 leave no blank down the table, is read row by row after each row's wide gap;
+a line under the rows starting with a note's mark (`*`, `†`) ends them and stays
+text; a cell carried on to the next line after a slash joins it with no space;
 `convert_traits.py` uses it, for tables in the
 columns and for those on a tinted panel of their own) and `pdf_layout.py
 --boxes` (a ruled table in a box, not yet used by a converter).

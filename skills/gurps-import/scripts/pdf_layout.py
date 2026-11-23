@@ -94,6 +94,12 @@ NOT_BOXES = set()                        # ids of frames that are no panels (--n
 SET_GUTTERS = {}                         # printed page -> its gutters, as the plan gives them (--set-gutters)
 REPLACE_CHARS = {}                       # characters a book's fonts give wrongly -> what the page prints (--replace-chars)
 CHARS_REPLACED = collections.Counter()
+# A glyph whose font gives no character for it comes through as "(cid:129)". It is almost always
+# a symbol (a bullet, a dash) that reads as nonsense where it stands: each is listed in the output
+# (`unmapped_glyphs`, by font, with a count and the first page), and check_coverage.py prints
+# them, until --replace-chars says what the page prints there.
+UNMAPPED_GLYPH = re.compile(r'^\(cid:\d+\)$')
+UNMAPPED = {}                             # (glyph, font) -> pages it was seen on
 _to_unichr = PDFSimpleFont.to_unichr
 
 
@@ -1025,6 +1031,8 @@ def page_lines(page, page_no, icon_fonts=(), marks=None, shapes=None, regions=No
         if c['text'] in REPLACE_CHARS:
             CHARS_REPLACED[c['text']] += 1
             c = dict(c, text=REPLACE_CHARS[c['text']])
+        elif UNMAPPED_GLYPH.match(c['text']):
+            UNMAPPED.setdefault((c['text'], f), []).append(page_no)
         chars.append(c)
     for cv in page.curves:
         if cv['x1'] - cv['x0'] < SHAPE_MAX and cv['bottom'] - cv['top'] < SHAPE_MAX and cv.get('fill'):
@@ -1233,6 +1241,7 @@ def read(pdf_path, first, last, offset, icon_fonts=(), boxes=False, icon_text=No
     REPLACE_CHARS.clear()
     REPLACE_CHARS.update(replace_chars or {})
     CHARS_REPLACED.clear()
+    UNMAPPED.clear()
     with pdfplumber.open(pdf_path) as pdf:
         n = len(pdf.pages)
         if first + offset < 1 or last + offset > n:
@@ -1300,7 +1309,9 @@ def read(pdf_path, first, last, offset, icon_fonts=(), boxes=False, icon_text=No
             'gutters': gutters, 'gutter_notes': gutter_notes, 'pages_without_text': empty, 'lines': lines,
             'marks': marks, 'shapes': shapes,
             'regions': regions, 'image_notes': notes, 'drop_capitals': drops, 'case_fixed': dict(CASE_FIXED),
-            'chars_replaced': {f'{k}={REPLACE_CHARS[k]}': n for k, n in CHARS_REPLACED.items()}}
+            'chars_replaced': {f'{k}={REPLACE_CHARS[k]}': n for k, n in CHARS_REPLACED.items()},
+            'unmapped_glyphs': [{'glyph': g, 'font': f, 'count': len(ps), 'first_page': ps[0]}
+                                for (g, f), ps in sorted(UNMAPPED.items())]}
 
 
 def text_view(doc):

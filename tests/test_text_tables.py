@@ -132,6 +132,33 @@ class FlushRightColumnTest(unittest.TestCase):
         self.assertIn('it reads as one column', failures[0])
 
 
+class TableNoteAndSlashTest(unittest.TestCase):
+    def test_a_note_under_the_rows_ends_them_and_stays_text(self):
+        t = table([[(70, 'Dusk'), (130, '2*')], [(70, 'Night'), (130, '4')], [(70, 'Fog'), (130, '6')]],
+                  [(70, 'Hour'), (130, 'Lamps')])
+        notes = [line(t[-1]['baseline'] + 11, [(56, '* Only where the harbour wall is')]),
+                 line(t[-1]['baseline'] + 22, [(56, 'lit, and never on a feast day.')])]
+        report = {'errors': [], 'questions': []}
+        out = entry_text.with_text_tables(t + notes, report, 'rules/lamps')
+        self.assertEqual(report['errors'], [])
+        self.assertEqual(report.get('not_tables'), None)
+        self.assertEqual([bool(l.get('block')) for l in out], [True, False, False])
+        self.assertEqual(out[0]['block']['rows'], [['Dusk', '2*'], ['Night', '4'], ['Fog', '6']])
+        self.assertEqual(out[1]['text'], '* Only where the harbour wall is')
+
+    def test_a_cell_carried_on_after_a_slash_joins_without_a_space(self):
+        t = table([[(70, '3'), (100, 'Lamp Oil'), right(260, '0.2')],
+                   [(70, '4'), (100, 'Whale Oil/')],
+                   [(110, 'Tallow Blend'), right(260, '0.4')],
+                   [(70, '5'), (100, 'Oil w/ wick'), right(260, '0.6')]],
+                  [(70, 'TL'), (100, 'Fuel'), right(260, 'Burn')])
+        report = {'errors': [], 'questions': []}
+        out = entry_text.with_text_tables(t, report, 'rules/lamps')
+        self.assertEqual(report['errors'], [])
+        self.assertEqual(out[0]['block']['rows'], [['3', 'Lamp Oil', '0.2'], ['4', 'Whale Oil/Tallow Blend', '0.4'],
+                                                   ['5', 'Oil w/ wick', '0.6']])
+
+
 class TextTableTest(unittest.TestCase):
     def read(self, lines):
         report = {'errors': [], 'questions': []}

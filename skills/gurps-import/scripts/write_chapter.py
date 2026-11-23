@@ -82,6 +82,10 @@ def main(argv=None):
                          capture_output=True, text=True, encoding='utf-8')
     if cov.returncode != 0:
         missing = [l for l in cov.stdout.splitlines() if l.startswith('missing')]
+        glyphs = [l for l in cov.stdout.splitlines() if l.startswith('unmapped glyph')]
+        if glyphs:
+            sys.exit(f'check_coverage.py: the pages have {len(glyphs)} glyphs their fonts give no character for; '
+                     f'nothing written. First: {glyphs[0]}')
         sys.exit(f'check_coverage.py: {len(missing)} words of the pages are in no entry; nothing written. '
                  f'First: {missing[0] if missing else cov.stdout[-200:]}')
     records = load(os.path.join(a.out, '_records.json'))
