@@ -941,7 +941,13 @@ def page_lines(page, page_no, icon_fonts=(), marks=None, shapes=None, regions=No
         edges = [float('-inf')] + list(usual) + [float('inf')]
         filled = sum(1 for i in range(len(usual) + 1)
                      if any(edges[i] <= (w['x0'] + w['x1']) / 2 < edges[i + 1] for w in sized))
-        if sized and max(crossing) <= max(1, rows // 50) and filled >= 2:
+        # Lines across a gutter are allowed too when they all lie above the columns: an opening
+        # set across the page, longer than a standfirst, over columns that start lower down. They
+        # are then read as full-width lines over the columns.
+        across = [w for w in sized if any(w['x0'] < g - 1 and w['x1'] > g + 1 for g in usual)]
+        later = [w for w in sized if (w['x0'] + w['x1']) / 2 >= usual[-1] and w not in across]
+        opening = bool(across) and bool(later) and max(w['baseline'] for w in across) < min(w['baseline'] for w in later)
+        if sized and (max(crossing) <= max(1, rows // 50) or opening) and filled >= 2:
             gutters = list(usual)
             if used_usual is not None:
                 used_usual.append(True)
@@ -1038,7 +1044,7 @@ def assign_headings(lines):
 
 
 def read(pdf_path, first, last, offset, icon_fonts=(), boxes=False, icon_text=None, margin_lines=(),
-         aside_fonts=(), icons_alone=False, replace_chars=None, not_boxes=()):
+         aside_fonts=(), icons_alone=False, replace_chars=None, not_boxes=(), usual_gutters=None):
     CASE_FIXED.clear()
     NOT_BOXES.clear()
     NOT_BOXES.update(not_boxes)
@@ -1067,11 +1073,16 @@ def read(pdf_path, first, last, offset, icon_fonts=(), boxes=False, icon_text=No
         counts = collections.Counter(len(r['gutters']) for r in pages.values())
         most = counts.most_common(1)[0][0] if counts else 0
         gutter_notes = []
-        if most and counts[most] >= max(3, 0.5 * len(pages)):
+        if usual_gutters:
+            # given (--usual-gutters): a chapter too short to show them on most of its pages
+            most = max(len(g) for g in usual_gutters.values())
+        if most and (usual_gutters or counts[most] >= max(3, 0.5 * len(pages))):
             # Left- and right-hand pages are often set as mirror images, their columns shifted by
             # the difference between the inner and outer margins: each side has its own usual.
-            usual_of = {}
+            usual_of = dict(usual_gutters or {})
             for side in (0, 1):
+                if side in usual_of:
+                    continue
                 with_most = [r['gutters'] for p, r in pages.items() if len(r['gutters']) == most and p % 2 == side]
                 if with_most:
                     usual_of[side] = [sorted(g[i] for g in with_most)[len(with_most) // 2] for i in range(most)]
@@ -1140,6 +1151,10 @@ def main(argv=None):
     ap.add_argument('--not-boxes', nargs='*', default=[], metavar='PAGE.N',
                     help='boxes, by the id a first reading gave them, that are no panels (a frame drawn round a '
                          'picture that text runs past): their words are read with the page')
+    ap.add_argument('--usual-gutters', nargs='*', default=[], metavar='SIDE=X,X',
+                    help='the book\'s usual gutters, for a chapter too short to show them on most of its pages: '
+                         'even=214.5,379.5 odd=232.5,397.5 (a page showing fewer is read again with them, '
+                         'where its words leave them clear)')
     ap.add_argument('--icons-alone', action='store_true',
                     help='with --icon-text: an icon glyph with no text beside it makes a line of its own '
                          '(icons turned over to the line under a heading); otherwise it is left out of the text')
@@ -1161,7 +1176,9 @@ def main(argv=None):
         if not at or not font:
             sys.exit(f'--aside-fonts {x}: write FONT@SIZE, e.g. Garamond-Italic@14')
     doc = read(a.pdf, first, last, a.page_offset, a.icon_fonts, a.boxes, icon_text, a.margin_lines, aside_fonts,
-               a.icons_alone, dict(x.split('=', 1) for x in a.replace_chars), a.not_boxes)
+               a.icons_alone, dict(x.split('=', 1) for x in a.replace_chars), a.not_boxes,
+               {('even', 'odd').index(k): [float(v) for v in x.split(',')]
+                for k, x in (u.split('=', 1) for u in a.usual_gutters)})
     if doc['pages_without_text']:
         print('no text layer on printed pages ' + ', '.join(map(str, doc['pages_without_text'])) +
               ': look at the page images, and ask before running OCR', file=sys.stderr)

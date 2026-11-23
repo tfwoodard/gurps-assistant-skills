@@ -398,7 +398,7 @@ class SpellsTest(unittest.TestCase):
         return {'source': 'ML', 'chapter': 'ch5', 'name_size': 14.0, 'cost_size': 11.0, 'icons': [], 'sections': [
             {'heading': 'Fog Spells', 'page': 10, 'traits': {'category': 'spells', 'kind': 'spell', 'line': 'spell',
                                                              'marks': {' (VH)': 'very_hard'}, 'labels': self.LABELS,
-                                                             'fields': {'college': 'Fog'}}}]}
+                                                             'fields': {'college': 'Fog'}, 'fields_from': 'end'}}]}
 
     def test_a_spells_class_what_resists_it_and_its_labelled_lines(self):
         entries, report = convert_traits.convert_chapter(self.chapter(), self.plan())
@@ -411,6 +411,109 @@ class SpellsTest(unittest.TestCase):
                          (True, 'Lift Fog (VH)', 'Regular', 'Resisted by the fog’s Will'))
         self.assertEqual((lift['duration'], lift['cost'], lift['time_to_cast'], lift['prerequisites']),
                          ('As for Thicken Fog.',) * 3 + ('Thicken Fog and Magery 1.',))
+
+
+class TemplatesAndTalentsTest(unittest.TestCase):
+    LABELS = {'Attributes': 'attributes', 'Advantages': 'advantages', 'Defaults': 'defaults'}
+
+    def label_line(self, p, label, rest, gap=None):
+        l = p.line(f'{label}: {rest}', gap=gap)
+        l['spans'] = [{'text': f'{label}:', 'size': 9.5, 'bold': True, 'italic': True},
+                      {'text': f' {rest}', 'size': 9.5, 'bold': False, 'italic': False}]
+        return l
+
+    def test_a_templates_points_and_its_flush_labelled_lines_with_hanging_lines_under_them(self):
+        p = Page()
+        p.line('SAMPLE KEEPERS', size=20.0, heading=2, bold=True)
+        p.para('Some keepers.')
+        p.name('Lamp Keeper')
+        p.cost('60 points')
+        p.para('You keep the lamp lit and', 'the boats safe.')
+        self.label_line(p, 'Attributes', 'ST 10 [0]; DX 11')
+        p.line('[20]; IQ 12 [40].', indent=12.0)
+        self.label_line(p, 'Advantages', 'Night Vision 2 [2];')
+        p.line('Lamp Sense [5].', indent=12.0)
+        self.label_line(p, 'Note', 'Choose one more, or')
+        p.line('two.', indent=12.0)
+        plan = {'source': 'ML', 'chapter': 'ch7', 'name_size': 14.0, 'cost_size': 11.0, 'icons': [], 'sections': [
+            {'heading': 'Sample Keepers', 'page': 10, 'traits': {'category': 'templates', 'kind': 'occupational',
+                                                                 'line': 'points', 'labels': self.LABELS, 'fields_from': 'end'}}]}
+        entries, report = convert_traits.convert_chapter({'lines': p.lines, 'regions': []}, plan)
+        self.assertEqual(report['errors'], [])
+        e = next(e for c, e in entries if e['slug'] == 'lamp-keeper')
+        self.assertEqual(e['fields'], {'kind': 'occupational', 'points': '60 points', 'attributes': 'ST 10 [0]; DX 11 [20]; IQ 12 [40].',
+                                       'advantages': 'Night Vision 2 [2]; Lamp Sense [5].'})
+        self.assertEqual(len(e['content']), 4)
+
+    def test_a_heading_that_ends_a_trait_hands_what_follows_back_to_the_section(self):
+        p = Page()
+        p.line('FOG SIGHT', size=20.0, heading=2, bold=True)
+        p.para('Seeing through fog.')
+        p.name('Fog Sight Talent')
+        p.cost('5 points/level')
+        p.para('You see through fog.')
+        p.name('Fog Sight Abilities')
+        p.para('Fog Sight abilities: Lamp Sense.')
+        plan = {'source': 'ML', 'chapter': 'ch6', 'name_size': 14.0, 'cost_size': 11.0, 'icons': [],
+                'sections': [{'heading': 'Fog Sight', 'page': 10, 'traits': {'category': 'advantages', 'kind': 'talent'}}],
+                'trait_ends': [{'page': 10, 'text': 'Fog Sight Abilities'}]}
+        entries, report = convert_traits.convert_chapter({'lines': p.lines, 'regions': []}, plan)
+        self.assertEqual(report['errors'], [])
+        by = {e['slug']: e for c, e in entries}
+        self.assertEqual([b.get('text') for b in by['fog-sight-talent']['content']], ['You see through fog.'])
+        self.assertEqual([b.get('text') for b in by['fog-sight']['content']],
+                         ['Seeing through fog.', 'Fog Sight Abilities', 'Fog Sight abilities: Lamp Sense.'])
+        plan['trait_ends'].append({'page': 11, 'text': 'Nothing'})
+        _, report = convert_traits.convert_chapter({'lines': p.lines, 'regions': []}, plan)
+        self.assertIn("plan trait_ends: no heading 'Nothing' on p11 after a trait", report['errors'])
+
+    def test_labelled_paragraphs_split_into_entries_of_their_own(self):
+        p = Page()
+        p.line('SAMPLE KEEPERS', size=20.0, heading=2, bold=True)
+        p.para('Some keepers.')
+        p.name('Marsh Bodies')
+        p.cost('Variable')
+        p.para('Your body is marsh stuff,', 'all of it.')
+        self.label_line(p, 'Body of Mud', 'Your body is mud,')
+        p.line('wet mud.')
+        p.para('It squelches when', 'you walk.')
+        self.label_line(p, 'Body of Reed', 'Your body is reeds,')
+        p.line('dry reeds.')
+        self.label_line(p, 'Note', 'Rare, and')
+        p.line('strange.')
+        plan = {'source': 'ML', 'chapter': 'ch7', 'name_size': 14.0, 'cost_size': 11.0, 'icons': [],
+                'sections': [{'heading': 'Sample Keepers', 'page': 10, 'traits': {'category': 'templates', 'kind': 'meta-trait'}}],
+                'split_labelled': {'templates/marsh-bodies': {'fields': {'kind': 'meta-trait'}, 'except': ['Note']}}}
+        entries, report = convert_traits.convert_chapter({'lines': p.lines, 'regions': []}, plan)
+        self.assertEqual(report['errors'], [])
+        by = {e['slug']: e for c, e in entries}
+        self.assertEqual([b['text'] for b in by['marsh-bodies']['content']],
+                         ['Your body is marsh stuff, all of it.', '***Note***:  Rare, and strange.'])
+        self.assertEqual([b['text'] for b in by['body-of-mud']['content']], ['Your body is mud, wet mud.', 'It squelches when you walk.'])
+        self.assertEqual((by['body-of-reed']['fields'], by['body-of-reed']['relations']),
+                         ({'kind': 'meta-trait'}, [{'role': 'adds-to', 'to': 'templates/marsh-bodies'}]))
+        self.assertEqual(report['split'], [{'entry': 'templates/marsh-bodies', 'into': ['Body of Mud', 'Body of Reed']}])
+
+    def test_a_skills_own_labels_open_its_text_and_a_specialtys_are_passed_over(self):
+        p = Page()
+        p.line('KNOWLEDGE LIST', size=20.0, heading=2, bold=True)
+        p.para('What keepers know.')
+        p.name('Rowing')
+        p.cost('DX/Easy')
+        self.label_line(p, 'Defaults', 'DX-4 or Swimming-')
+        p.line('4.')
+        p.para('You row, with oars,', 'on water.')
+        self.label_line(p, 'Punts', 'Flat boats moved')
+        p.line('with a pole.')
+        self.label_line(p, 'Defaults', 'Rowing-2 or')
+        p.line('DX-5.')
+        plan = {'source': 'ML', 'chapter': 'ch4', 'name_size': 14.0, 'cost_size': 11.0, 'icons': [], 'sections': [
+            {'heading': 'Knowledge List', 'page': 10, 'traits': {'category': 'skills', 'kind': 'skill', 'line': 'skill',
+                                                                 'labels': self.LABELS}}]}
+        entries, report = convert_traits.convert_chapter({'lines': p.lines, 'regions': []}, plan)
+        e = next(e for c, e in entries if e['slug'] == 'rowing')
+        self.assertEqual(e['fields']['defaults'], 'DX-4 or Swimming-4.')
+        self.assertEqual(report['labels_passed_over'], [{'entry': 'skills/rowing', 'labels': ['Defaults']}])
 
 
 class NoCostLineTest(unittest.TestCase):

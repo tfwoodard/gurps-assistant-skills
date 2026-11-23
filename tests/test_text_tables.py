@@ -61,6 +61,25 @@ class KeyedListTest(unittest.TestCase):
         self.assertEqual(entry_text.with_keyed_lists(lines, report, 'rules/lamps'), lines)
 
 
+class KeyedListAcrossColumnsTest(unittest.TestCase):
+    def test_a_keyed_list_set_as_paragraphs_carries_on_into_the_next_column(self):
+        def item(y, x, text, para):
+            l = line(y, [(x, text)])
+            l['para'] = para
+            return l
+        lines = [item(201.0, 72, '1 – A match: lights a', True), item(212.0, 60, 'candle.', False),
+                 item(223.0, 72, '2 – A torch: lights', True), item(234.0, 60, 'paper.', False)]
+        right = [item(80.0, 252, '3 – A forge: melts', True), item(91.0, 240, 'iron.', False),
+                 item(102.0, 240, 'Cost to keep it up is the same.', True)]
+        for l in right:
+            l['column'] = 'right'
+        report = {'errors': [], 'questions': []}
+        out = entry_text.with_keyed_lists(lines + right, report, 'spells/kindle')
+        self.assertEqual([bool(l.get('block')) for l in out], [True, False])
+        self.assertEqual(out[0]['block']['items'], ['1 – A match: lights a candle.', '2 – A torch: lights paper.',
+                                                    '3 – A forge: melts iron.'])
+
+
 class TextTableTest(unittest.TestCase):
     def read(self, lines):
         report = {'errors': [], 'questions': []}

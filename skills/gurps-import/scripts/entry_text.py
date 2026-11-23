@@ -68,13 +68,19 @@ def fix_case(text):
         core = re.sub(r'[^A-Za-z]', '', orig)
         if core.upper() in ACRONYMS:
             out.append(orig.upper())                        # an acronym (XP, SL) in capitals
+        elif all_caps and re.fullmatch(r'\([A-Z]{2,3}\)', orig):
+            out.append(orig)                                # a short abbreviation in brackets: "(PK)"
         elif re.fullmatch(r'[a-z]\.', orig):
             out.append(orig)                                # an abbreviation ("c." for circa)
         elif i and i < len(parts) - 1 and w in SMALL_WORDS and not out[-1].endswith(':'):   # not a title's last word
             out.append(w)
         else:
             k = next((j for j, ch in enumerate(w) if ch.isalpha()), 0)   # "(elves)" -> "(Elves)"
-            out.append(w[:k] + w[k:k + 1].upper() + w[k + 1:])
+            w = w[:k] + w[k:k + 1].upper() + w[k + 1:]
+            if all_caps:
+                # each part of a hyphenated word set in capitals: "META-TRAITS" -> "Meta-Traits"
+                w = re.sub(r'-([a-z])', lambda m: '-' + m.group(1).upper(), w)
+            out.append(w)
     return ' '.join(out)
 
 
@@ -259,7 +265,7 @@ def runs_on(prev, l):
             bool(re.match(r'^[a-z]', plain(l['text']))))
 
 
-SENTENCE_END = re.compile(r'[.!?:;…]["”’)\]]*\**$')
+SENTENCE_END = re.compile(r'[.!?:…]["”’)\]]*\**$')
 INDENT = (5.0, 22.0)                  # points: a paragraph's first line starts this much further in
 
 
@@ -277,6 +283,7 @@ def mark_paragraphs(lines):
 
     body = [l for l in lines if not l.get('heading')]
     pos = {id(l): i for i, l in enumerate(lines)}
+    hang = None                       # (group, x0) of a labelled line set flush, its later lines hanging
     edge = {}                         # each column's left edge: the least x0 of its lines
     for l in body:
         edge[group(l)] = min(edge.get(group(l), l['x0']), l['x0'])
@@ -293,10 +300,36 @@ def mark_paragraphs(lines):
         elif prev is not None and INDENT[0] <= l['x0'] - prev['x0'] <= INDENT[1]:
             l['para'] = ended                      # a one-line paragraph that ends its column
         elif prev is None and INDENT[0] <= l['x0'] - edge[group(l)] <= INDENT[1]:
-            l['para'] = True                       # a one-line paragraph under a heading, or opening a column
+            # a one-line paragraph under a heading, or opening a column; but not where the column
+            # before broke off mid-sentence (a hanging list carried over: "... [-20];" / "Supernatural ...")
+            before = body[i - 1] if i and pos[id(body[i - 1])] == pos[id(l)] - 1 else None
+            l['para'] = not (before is not None and before.get('box') == l.get('box') and
+                             re.search(r'[;,]\**$', plain(before['text']).rstrip()))
         else:
             l['para'] = False
+        if hang and hang[0] == group(l) and l['x0'] > hang[1] + INDENT[0] - 1 and not starts_with_label(l):
+            l['para'] = False                      # a line hanging under a flush labelled line
+        elif not l['para'] and ended and starts_with_label(l):
+            # a labelled line set flush, its own lines hanging under it ("Attributes: ST 10 [0];")
+            l['para'] = True
+        if starts_with_label(l) and l['para'] and abs(l['x0'] - edge[group(l)]) < 1.5:
+            hang = (group(l), l['x0'])
+        elif l['para'] or not hang or hang[0] != group(l) or l['x0'] <= hang[1] + 1:
+            hang = None
     return lines
+
+
+def starts_with_label(l):
+    """True when a line opens with a label in bold or italic ending in a colon ("Attributes:")."""
+    first = next((sp for sp in l.get('spans') or [] if sp['text'].strip()), None)
+    if not first or not (first['bold'] or first['italic']):
+        return False
+    lead = first['text'].strip()
+    if not re.match(r'^[^\W\d_][^:]{0,40}:$', lead):
+        return False
+    rest = [sp for sp in l['spans'][l['spans'].index(first) + 1:] if sp['text'].strip()]
+    # the label alone on its line, or followed by text in another style
+    return not rest or not (rest[0]['bold'] == first['bold'] and rest[0]['italic'] == first['italic'])
 
 
 def new_paragraph(l, prev):
@@ -567,8 +600,9 @@ def is_table_header(l):
     """A line of a text table's header: set wholly in bold italic at the size of the text. Spans
     with no letters in them (a multiplication sign from a symbol font) don't count either way."""
     lettered = [s for s in l.get('spans') or [] if re.search(r'[^\W\d_]', s['text'])]
+    # (a line ending in a colon is a label for the text after it, not a header)
     return (not l.get('heading') and not l.get('block') and bool(lettered) and
-            all(s['bold'] and s['italic'] for s in lettered))
+            all(s['bold'] and s['italic'] for s in lettered) and not plain(l['text']).rstrip().endswith(':'))
 
 
 def read_text_table(header, rows):
@@ -810,9 +844,15 @@ def with_keyed_lists(lines, report, where, vocab=None):
     following lines set in further (a hanging indent), with nothing else between them. It is the
     way a book prints the results of a roll as running text. Each item keeps its words as
     printed; the list is noted in the report's `keyed_lists`."""
-    def item_start(l, edge=None):
-        return (not l.get('heading') and not l.get('block') and bool(KEY.match(plain(l['text']))) and
-                (edge is None or abs(l['x0'] - edge) <= 1.5))
+    def where_(l):
+        return (l['page'], l['column'], l.get('box'))
+
+    def item_start(l, edges=None):
+        """A line that starts an item: at the list's left edge in its column (a list can carry on
+        into the next column, whose edge it takes from its first item there)."""
+        if l.get('heading') or l.get('block') or not KEY.match(plain(l['text'])):
+            return False
+        return edges is None or where_(l) not in edges or abs(l['x0'] - edges[where_(l)]) <= 1.5
 
     out, i = [], 0
     while i < len(lines):
@@ -821,13 +861,13 @@ def with_keyed_lists(lines, report, where, vocab=None):
             out.append(l)
             i += 1
             continue
-        edge, items, j = l['x0'], [], i
-        while j < len(lines) and item_start(lines[j], edge):
+        edges, items, j = {where_(l): l['x0']}, [], i
+        while j < len(lines) and item_start(lines[j], edges) and lines[j].get('box') == l.get('box'):
+            edges.setdefault(where_(lines[j]), lines[j]['x0'])
+            edge = edges[where_(lines[j])]
             run = [lines[j]]
             j += 1
-            while j < len(lines) and not lines[j].get('heading') and not lines[j].get('block') and \
-                    not item_start(lines[j], edge) and lines[j]['x0'] > edge + 3 and \
-                    lines[j].get('box') == l.get('box'):
+            while j < len(lines) and not lines[j].get('heading') and not lines[j].get('block') and                     where_(lines[j]) == where_(run[0]) and not item_start(lines[j], edges) and                     (lines[j]['x0'] > edge + 3 or ('para' in lines[j] and not lines[j]['para'])):
                 run.append(lines[j])
                 j += 1
             items.append(run)

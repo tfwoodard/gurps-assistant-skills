@@ -60,10 +60,19 @@ set over two or more lines is given joined). A list's `traits` can also say:
     true-or-false field (the name loses them, and `printed_name` keeps it as printed);
   * `"labels": {"Defaults": "defaults"}` for labelled paragraphs that are fields as well as text (a
     label naming several, a list of fields);
+    `"fields_from": "start"` (the default), `"end"` or `"both"` says where in a trait's text its own
+    labelled paragraphs are;
   * `"starred": "self_control"` to make a field of the asterisk a list prints after some costs;
   * `"no_cost_line": true` for a list whose traits print no line of their own because the
     section's text gives one cost for all (perks), with that cost under `fields`;
-  * `"name_size"` for the size its traits' names are set in, when it is not the chapter's.
+  * `"name_size"` for the size its traits' names are set in, when it is not the chapter's;
+  * `"line": "points"` for a template's point total, read into `points`.
+
+`trait_ends` lists headings ({page, text}) that end the trait before them: what follows, up to
+the next trait, goes to the section's own entry ("ESP Abilities" after "ESP Talent").
+`split_labelled` ({ref: {fields, except}}) makes each paragraph of that entry that opens with a
+label ("*Body of Air:* ...") an entry of its own, named by the label, with the paragraphs after
+it, adding to the entry it came from; a label in `except` ("Note") stays with that entry.
 
 `--taken` (or `--library-data`, for every category index in a library-data folder) gives the slugs
 the library holds: a trait of the same name as another source's, in the same category, becomes a
@@ -87,13 +96,15 @@ from entry_text import (blocks_from_lines, fix_case, is_table_header, mark_parag
 from render_entry import render  # noqa: E402
 
 # fields that hold words printed on the page
-PRINTED_FIELDS = ('cost', 'types', 'see', 'attribute', 'difficulty', 'printed_name', 'class', 'resisted')
+PRINTED_FIELDS = ('cost', 'types', 'see', 'attribute', 'difficulty', 'printed_name', 'class', 'resisted', 'points')
 SKILL_LINE = re.compile(r'^(?P<attribute>(?:ST|DX|IQ|HT|Will|Per)(?: or (?:ST|DX|IQ|HT|Will|Per))*)/(?P<difficulty>[A-Z][A-Za-z ]+)$')
 TECHNIQUE_LINE = re.compile(r'^(?P<difficulty>Average|Hard)$')
 SPELL_CLASS = r'(?:Regular|Area|Information|Special|Missile|Melee|Blocking|Enchantment|Charm)'
 # a spell's line: its classes, then what resists it, as printed ("Regular; Resisted by HT")
 SPELL_LINE = re.compile(r'^(?P<spell_class>' + SPELL_CLASS + r'(?:; ' + SPELL_CLASS + r')*)(?:; (?P<resisted>Resist.*))?$')
 SEE = re.compile(r'^see\b', re.I)
+# a paragraph that opens with a label in bold or italic ("*Body of Air:* Your body ...")
+LABELLED = re.compile(r'^(?P<marks>\*{1,3})(?P<label>[^*:]{2,60})(?::(?P=marks)|(?P=marks):)\s*(?P<rest>.*)$', re.S)
 
 
 def near(a, b, tol=0.3):
@@ -161,6 +172,7 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None):
             report['left_out'].append({'page': l['page'], 'text': l['text'], 'why': spec['why']})
         lines = [l for l in lines if not any(l is h for h in hit)]
     renames = {(r['page'], r['name'], r.get('section', '').lower()): r for r in plan.get('rename', [])}
+    ended = set()                             # trait_ends headings found
     renamed = set()
 
     def rename_key(page, name, section):
@@ -242,9 +254,23 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None):
         starts = []
         for j, (k, run) in enumerate(inner):
             if k == 'heading' and near(run[0]['size'], t.get('name_size', name_size)) and \
-                    (run[0]['page'], heading_text(run)) not in not_traits:
+                    (run[0]['page'], heading_text(run)) not in not_traits and \
+                    (run[0]['page'], heading_text(run)) not in {(e['page'], e['text']) for e in plan.get('trait_ends', [])}:
                 starts.append(j)
         intro = [l for _, run in inner[:starts[0] if starts else len(inner)] for l in run]
+        # A heading the plan says ends the trait before it ("ESP Abilities" after "ESP Talent"):
+        # what follows it, up to the next trait, is the section's, not the trait's.
+        ends = {(e['page'], e['text']) for e in plan.get('trait_ends', [])}
+        cut = {}                                  # start index -> where its trait ends
+        for m_, j_ in enumerate(starts):
+            stop = starts[m_ + 1] if m_ + 1 < len(starts) else len(inner)
+            for k_ in range(j_ + 1, stop):
+                kind_, run_ = inner[k_]
+                if kind_ == 'heading' and (run_[0]['page'], heading_text(run_)) in ends:
+                    cut[j_] = k_
+                    ended.add((run_[0]['page'], heading_text(run_)))
+                    intro += [l for _, run in inner[k_:stop] for l in run]
+                    break
         if intro:
             add('rules', title, head[0], parent, dict(plan.get('rules_fields', {})), intro, level, size)
         else:
@@ -279,7 +305,8 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None):
                     again['slug'] = renames[key]['slug']
                 if renames[key].get('relation'):
                     again['relations'] = [renames[key]['relation']]
-            rest = [l for _, run in inner[j + 1:starts[m + 1] if m + 1 < len(starts) else len(inner)] for l in run]
+            rest = [l for _, run in inner[j + 1:cut.get(j, starts[m + 1] if m + 1 < len(starts) else len(inner))]
+                    for l in run]
             cost_lines = []
             while not t.get('no_cost_line') and rest and near(rest[0]['size'], cost_size) and rest[0].get('heading') and \
                     rest[0]['page'] == (cost_lines or name_run)[-1]['page'] and \
@@ -317,6 +344,8 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None):
                 pass
             elif SEE.match(cost):
                 fields['see'] = cost
+            elif kind_of_line == 'points':
+                fields['points'] = cost          # a template's point total, as printed
             elif kind_of_line == 'spell':
                 # a spell's line gives its class (or classes) and, when it can be resisted, by what
                 hit = SPELL_LINE.match(cost)
@@ -347,18 +376,56 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None):
             entry = add(t['category'], name, name_run[0], title, fields, rest, name_run[0].get('heading', level + 1),
                         t.get('name_size', name_size), again)
             # labelled paragraphs the list gives each trait ("Defaults: IQ-5 or ..."): fields too,
-            # as printed; they stay in the text where they are
-            for b in entry['content']:
+            # as printed; they stay in the text where they are. Only the trait's own, which the
+            # list sets in one place (its `fields_from`): at the start of the text, before anything
+            # else (a skill's Defaults), or at its end (a spell's Duration and Cost, a template's
+            # lists), after the last paragraph with a label of another kind (a specialty, an
+            # example), tables and notes allowed among them. The same labels elsewhere belong to a
+            # specialty or an example, and are passed over and listed.
+            def label_of_block(b):
                 if b['type'] != 'paragraph':
-                    continue
-                text = plain(b['text'])
-                label, colon, rest_of = text.partition(':')
-                if colon and label in t.get('labels', {}):
-                    # a label can name several fields at once ("Duration, Cost, and Time to cast")
-                    targets = t['labels'][label]
-                    for field in [targets] if isinstance(targets, str) else targets:
-                        entry['fields'].setdefault(field, rest_of.strip())
+                    return None
+                m = LABELLED.match(b['text'])
+                if m:
+                    return m.group('label').strip()
+                label, colon, _ = plain(b['text']).partition(':')
+                return label if colon and label in t.get('labels', {}) else None
 
+            def labelled(b):
+                label = label_of_block(b)
+                if label not in t.get('labels', {}):
+                    return None
+                return label, plain(b['text']).partition(':')[2].strip()
+
+            blocks = entry['content']
+            where_from = t.get('fields_from', 'start')
+            own = set()
+            if where_from in ('start', 'both'):
+                k = 0
+                while k < len(blocks) and labelled(blocks[k]):
+                    own.add(k)
+                    k += 1
+            if where_from in ('end', 'both'):
+                # (a note after them, "Note: ...", is no label of another kind)
+                notes = set(t.get('notes', ['Note', 'Notes']))
+                others = [k for k, x in enumerate(blocks) if label_of_block(x) and not labelled(x) and
+                          label_of_block(x) not in notes]
+                after = others[-1] + 1 if others else 0
+                own |= {k for k in range(after, len(blocks)) if labelled(blocks[k])}
+            for k in sorted(own):
+                label, rest_of = labelled(blocks[k])
+                # a label can name several fields at once ("Duration, Cost, and Time to cast")
+                targets = t['labels'][label]
+                for field in [targets] if isinstance(targets, str) else targets:
+                    entry['fields'].setdefault(field, rest_of)
+            passed = [labelled(x)[0] for k, x in enumerate(blocks) if k not in own and labelled(x)]
+            if passed:
+                report.setdefault('labels_passed_over', []).append({'entry': f'{t["category"]}/{entry["slug"]}',
+                                                                     'labels': passed})
+
+    for e_ in plan.get('trait_ends', []):
+        if (e_['page'], e_['text']) not in ended:
+            report['errors'].append(f'plan trait_ends: no heading {e_["text"]!r} on p{e_["page"]} after a trait')
     for key in set(renames) - renamed:
         report['errors'].append(f'plan rename: no trait {key[1]!r} on p{key[0]}')
     for key in set(trait_sections) - used_sections:
@@ -424,6 +491,36 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None):
     for bid in box_plans:
         if bid not in {r['id'] for r in layout.get('regions', [])}:
             report['errors'].append(f'plan box {bid} is not a box in the layout')
+
+    # --- labelled paragraphs that are entries of their own --------------------------------------
+    # ("Body of Air: ..." inside Elemental Meta-Traits: each a meta-trait, read with the group)
+    for ref, how in plan.get('split_labelled', {}).items():
+        owner = next((e for c, e in entries if f'{c}/{e["slug"]}' == ref), None)
+        if owner is None:
+            report['errors'].append(f'plan split_labelled: {ref} is no entry of the chapter')
+            continue
+        category = ref.split('/', 1)[0]
+        keep, new, current = [], [], None
+        for b in owner['content']:
+            m = LABELLED.match(b.get('text', '')) if b['type'] == 'paragraph' else None
+            if m and m.group('label') not in how.get('except', []):
+                label = m.group('label')
+                page = next((l['page'] for l in lines if plain(l['text']).startswith(label + ':')), owner['page'])
+                current = {'slug': slugify(label), 'name': label, 'source': source, 'chapter': chapter,
+                           'section': owner['name'], 'page': page, 'fields': dict(how.get('fields', {})),
+                           'level': owner.get('level', 2) + 1, 'content': [dict(b, text=m.group('rest'))],
+                           'relations': [{'role': 'adds-to', 'to': ref}]}
+                new.append(current)
+            elif current is not None and b['type'] != 'heading' and not m:
+                current['content'].append(b)
+            else:
+                current = None
+                keep.append(b)
+        if not new:
+            report['errors'].append(f'plan split_labelled: {ref} has no labelled paragraphs')
+        owner['content'] = keep
+        entries += [(category, e) for e in new]
+        report.setdefault('split', []).append({'entry': ref, 'into': [e['name'] for e in new]})
 
     # --- slugs, the plan's own notes on entries, names shared with other sources --------------
     seen = {}
