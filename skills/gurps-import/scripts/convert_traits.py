@@ -51,7 +51,11 @@ at the entry's end); `title_lines` says how many of its first lines are its titl
 is set as that many like tables side by side, to be read one after another.
 
 `lead_lines` says how many lines after the title are text before the table ("This table
-summarizes ..."): they go into the entry as a paragraph before it.
+summarizes ..."): they go into the entry as a paragraph before it. `after_lines` says how many of
+the panel's last lines are text after the table (a way to work out what it lists): they go in as
+a paragraph after it. `empty_cells` lists the cells, as [row, column] counted from 1, that the
+page prints blank ("No lamps are lit." filling a row whose last column is left empty); any other
+empty cell fails the table, and so does one listed that is not blank.
 
 `sections` names only the sections that are trait lists (matched by heading and page; a heading
 set over two or more lines is given joined). A list's `traits.category` may be `"by-cost"` for a
@@ -496,11 +500,15 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None):
             # and the lines of text between its title and its header ("This table lists the lamps ..."),
             # which go before the table as a paragraph
             lead, bl = bl[:bp.get('lead_lines', 0)], bl[bp.get('lead_lines', 0):]
+            # and the lines of text after it, at the panel's foot, which go after it as a paragraph
+            n_after = bp.get('after_lines', 0)
+            bl, after = (bl[:-n_after], bl[-n_after:]) if n_after else (bl, [])
             k = next((i for i, l in enumerate(bl) if not is_table_header(l)), len(bl))
             if k == 0 or len(bl) - k < 2:
                 report['errors'].append(f'box {bid} (p{region["page"]}): no header line and two rows to read as a table')
                 continue
-            block = table_block(bl[:k], bl[k:], report, target, ' '.join(l['text'] for l in title_lines), bp.get('fold'))
+            block = table_block(bl[:k], bl[k:], report, target, ' '.join(l['text'] for l in title_lines), bp.get('fold'),
+                                empty=[tuple(c) for c in bp.get('empty_cells', [])])
             if block is None:
                 continue
             blocks = owner['content']
@@ -515,6 +523,8 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None):
                 blocks.insert(at, b)
                 at += 1
             blocks.insert(at, block)
+            for j, b in enumerate(blocks_from_lines(after, report, target, vocab)):
+                blocks.insert(at + 1 + j, b)
             block['read_with'] = [side for side, j in (('before', at - 1), ('after', at + 1))
                                   if 0 <= j < len(blocks) and blocks[j]['type'] == 'paragraph']
             continue

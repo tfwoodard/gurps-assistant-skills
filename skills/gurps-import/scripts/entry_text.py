@@ -666,7 +666,7 @@ def flush_right_tails(headers, rows, size, right):
     return tails
 
 
-def read_text_table(header, rows):
+def read_text_table(header, rows, empty=()):
     """Header line(s) and the row lines under them -> (columns, rows of cells, banners, failures).
 
     The columns are the blanks that every row leaves clear: no row has a word there. When none is,
@@ -680,7 +680,8 @@ def read_text_table(header, rows):
     means it was read with nothing left to doubt:
 
       * the rows leave at least one blank column between them;
-      * every row has something in every column;
+      * every row has something in every column, but the cells in `empty` ((row, column), counted
+        from 1), which the page prints blank, and which must be blank;
       * every column has a name in the header or stands under a banner;
       * each column's cells line up: left edges, right edges, centres, or figures ending together."""
     headers = header if isinstance(header, list) else [header]
@@ -901,8 +902,13 @@ def read_text_table(header, rows):
     rows = [ls[0] for _, ls in merged]
     grid = first_lines
     for i, r in enumerate(out_rows):
-        if any(not c for c in r):
-            failures.append(f'row {i + 1} has nothing in column {r.index("") + 1}: {rows[i]["text"]!r}')
+        blank = [c for c in range(ncols) if not r[c] and (i + 1, c + 1) not in empty]
+        if blank:
+            failures.append(f'row {i + 1} has nothing in column {blank[0] + 1}: {rows[i]["text"]!r}')
+    for i, c in sorted(empty):
+        if not (1 <= i <= len(out_rows) and 1 <= c <= ncols) or out_rows[i - 1][c - 1]:
+            got = out_rows[i - 1][c - 1] if 1 <= i <= len(out_rows) and 1 <= c <= ncols else 'no such cell'
+            failures.append(f'row {i}, column {c} is listed as printed blank, but it is not: {got!r}')
     for c in range(ncols):
         col = [r[c] for r in grid if r[c]]
         if len(col) < 2:
@@ -930,13 +936,16 @@ def read_text_table(header, rows):
     return columns, out_rows, banners, failures
 
 
-def table_block(headers, rows, report, where, title='', fold=None):
+def table_block(headers, rows, report, where, title='', fold=None, empty=()):
     """Read one text table and note it in the report's `tables`. Returns its block, or None when
-    a check failed (the failure is in the report's `errors`, and nothing is written on a guess)."""
-    columns, cells, banners, failures = read_text_table(headers, rows)
+    a check failed (the failure is in the report's `errors`, and nothing is written on a guess).
+    `empty` lists the cells the page prints blank (read_text_table)."""
+    columns, cells, banners, failures = read_text_table(headers, rows, empty)
     shown = ' / '.join(h['text'] for h in headers)
     note = {'entry': where, 'page': headers[0]['page'], 'header': shown, 'columns': columns, 'rows': cells,
             'failures': failures}
+    if empty:
+        note['blank_as_printed'] = [list(c) for c in sorted(empty)]
     if banners:
         note['banners'] = banners
     report.setdefault('tables', []).append(note)

@@ -661,10 +661,10 @@ def banded_panels(page):
         w, h = r['x1'] - r['x0'], r['bottom'] - r['top']
         if w < BOX_MIN[0] or h < BOX_MIN[1] or w * h > 0.8 * area:
             continue
-        # the bands run the panel's whole width (the page's own white ground holds bands too,
-        # those of tables set in its columns, but they are far narrower than it)
-        if any(abs(b['x0'] - r['x0']) <= 4 and abs(b['x1'] - r['x1']) <= 4 and r['top'] <= b['top'] <= r['bottom']
-               for b in bands):
+        # the bands run the panel's width, within its margins (the page's own white ground holds
+        # bands too, those of tables set in its columns, but they are far narrower than it)
+        if any(b['x0'] >= r['x0'] - 2 and b['x1'] <= r['x1'] + 2 and b['x1'] - b['x0'] >= 0.9 * w and
+               r['top'] <= b['top'] <= r['bottom'] for b in bands):
             out.append((max(0.0, r['x0']), max(0.0, r['top']), min(page.width, r['x1']), min(page.height, r['bottom'])))
     return out
 
@@ -1011,6 +1011,49 @@ def icon_words(page, words, icon_text, marks_here, shapes_here, alone=False):
     return out
 
 
+def quote_sources(quote_chars, chars):
+    """The characters of each pull quote's source: a quotation's speaker and story, set under it
+    at its size in another face of the type (the story's title in bold italics), which can't be
+    named as an aside font when headings are set in that face. A source line is a run of
+    characters of the quote's size on the line straight under the quote (or under a source line
+    already taken), starting within the quote's width; the run is taken whole, however far right
+    it reaches, up to a gap of twice the size."""
+    blocks = []
+    for c in sorted(quote_chars, key=lambda c: c['top']):
+        if blocks and c['top'] - blocks[-1]['bottom'] < 2 * c['size']:
+            b = blocks[-1]
+            b.update(x0=min(b['x0'], c['x0']), x1=max(b['x1'], c['x1']), bottom=max(b['bottom'], c['bottom']))
+        else:
+            blocks.append({'top': c['top'], 'bottom': c['bottom'], 'x0': c['x0'], 'x1': c['x1'], 'size': c['size']})
+    taken = {id(c) for c in quote_chars}
+    found = []
+    for b in blocks:
+        while True:
+            near = [c for c in chars if id(c) not in taken and abs(c['size'] - b['size']) < 0.3 and
+                    b['top'] - 1 <= c['top'] <= b['bottom'] + 0.8 * b['size']]
+            rows = collections.defaultdict(list)
+            for c in near:
+                rows[round(c['top'])].append(c)
+            more = []
+            for row in rows.values():
+                row.sort(key=lambda c: c['x0'])
+                start = next((k for k, c in enumerate(row) if b['x0'] - b['size'] <= c['x0'] <= b['x1']), None)
+                if start is None:
+                    continue
+                run = [row[start]]
+                for c in row[start + 1:]:
+                    if c['x0'] - run[-1]['x1'] >= 2 * b['size']:
+                        break
+                    run.append(c)
+                more += run
+            if not more:
+                break
+            found += more
+            taken |= {id(c) for c in more}
+            b['bottom'] = max(b['bottom'], max(c['bottom'] for c in more))
+    return found
+
+
 def page_lines(page, page_no, icon_fonts=(), marks=None, shapes=None, regions=None, icon_text=None,
                notes=None, drops=None, aside_fonts=(), usual=None, used_usual=None, icons_alone=False):
     """One page -> (lines in reading order, gutter x or None). Icon glyphs go to `marks`, small
@@ -1049,7 +1092,9 @@ def page_lines(page, page_no, icon_fonts=(), marks=None, shapes=None, regions=No
     is_aside = lambda c: any(font_name(c.get('fontname', '')) == f and abs(c['size'] - z) < 0.3 for f, z in aside_fonts)
     aside_chars = [c for c in chars if is_aside(c)] if aside_fonts else []
     if aside_chars:
-        chars = [c for c in chars if not is_aside(c)]
+        aside_chars += quote_sources(aside_chars, chars)
+        taken = {id(c) for c in aside_chars}
+        chars = [c for c in chars if id(c) not in taken]
     words = make_words(chars, page.height, page_no, drops)
     if icon_text:
         words += icon_words(page, words, icon_text, marks_here, shapes_here, icons_alone)
