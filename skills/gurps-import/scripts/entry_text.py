@@ -226,6 +226,12 @@ def join_lines(parts, report, where, vocab=None):
                      'both halves are words, and the book prints neither form elsewhere'})
                 out += p
                 continue
+            elif vocab is not None and (re.match(r'^\*{0,3}\d', p) or re.search(r'[)\]]-$', out)):
+                # a figure after it, or a bracket before it ("Engineer (same)-" / "4"): a modifier
+                report.setdefault('hyphens_kept', []).append(
+                    {'entry': where, 'text': out[-20:] + p[:20], 'why': 'a figure or an abbreviation'})
+                out += p
+                continue
             elif vocab is not None and re.search(r'\s-$', out):
                 # A dash standing by itself at the line's end ("roll vs. IQ -" / "Complexity") is a
                 # minus sign or a dash between words, not a broken word: the next word follows it.
@@ -632,33 +638,43 @@ def read_text_table(header, rows):
                 phrases[-1].append(w)
             else:
                 phrases.append([w])
+        # A banner is one phrase standing over the cells of two or more columns. A name wider
+        # than its own column's cells (a long name over a column of short figures) reaches into
+        # the blank beside them, perhaps past its middle, but not over the next cells.
+        spans = []
         for ph in phrases:
             x0, x1 = ph[0][1], ph[-1][2]
+            over = [c for c in range(ncols) if min(x1, extent[c][1]) - max(x0, extent[c][0]) >= 0.4 * size]
+            spans.append((ph, x0, x1, over))
+        own = set()                    # columns with a phrase of their own on this line
+        for ph, x0, x1, over in spans:
+            if len(over) < 2:
+                c = over[0] if over else column_of((x0 + x1) / 2)
+                names[c].append(' '.join(w[0] for w in ph))
+                own.add(c)
+        for ph, x0, x1, over in spans:
+            if len(over) < 2:
+                continue
             text = ' '.join(w[0] for w in ph)
-            # A banner is one phrase standing over the cells of two or more columns. A name wider
-            # than its own column's cells (a long name over a column of short figures) reaches
-            # into the blank beside them, perhaps past its middle, but not over the next cells.
-            over = [c for c in range(ncols)
-                    if min(x1, extent[c][1]) - max(x0, extent[c][0]) >= 0.4 * size]
-            if len(over) >= 2:
-                # Which columns it is a banner over: a run of columns holding those it stands
-                # over, such that it is centred on the run or starts where the run starts. (Its
-                # ends may fall short of the outer columns' cells, so overlap alone can miss one.)
-                best = None
-                for a in range(over[0] + 1):
-                    for b in range(over[-1], ncols):
-                        centre = abs((x0 + x1) / 2 - (extent[a][0] + extent[b][1]) / 2)
-                        off = min(centre, abs(x0 - extent[a][0]))
-                        if best is None or (off, b - a) < best[:2]:
-                            best = (off, b - a, a, b)
-                if best[0] > size:
-                    failures.append(f'the banner {text!r} in its header is neither centred over a run of columns nor '
-                                    f'starts with one')
+            # Which columns it is a banner over: a run of columns holding those it stands over,
+            # none of them named beside it on its own line, such that it is centred on the run or
+            # starts where the run starts. (Its ends may fall short of the outer columns' cells,
+            # so overlap alone can miss one.) Of runs that fit equally, the widest.
+            runs = [(a, b) for a in range(over[0] + 1) for b in range(over[-1], ncols)
+                    if not any(c in own for c in range(a, b + 1))]
+            mid = (x0 + x1) / 2
+            centred = [(b - a, -abs(mid - (extent[a][0] + extent[b][1]) / 2), a, b) for a, b in runs
+                       if abs(mid - (extent[a][0] + extent[b][1]) / 2) <= size]
+            started = [(b - a, -abs(x0 - extent[a][0]), a, b) for a, b in runs if abs(x0 - extent[a][0]) <= size]
+            # centred on a run if it is on any (the widest such: cells are narrower than the names
+            # over them, so a banner centred on four columns is centred on the middle two as well);
+            # failing that, starting where a run starts
+            best = max(centred) if centred else max(started) if started else None
+            if best is None:
+                failures.append(f'the banner {text!r} in its header is neither centred over a run of columns nor '
+                                f'starts with one')
+            if best is not None:
                 banners.append({'text': text, 'from': best[2], 'to': best[3]})
-            elif over:
-                names[over[0]].append(text)
-            else:
-                names[column_of((x0 + x1) / 2)].append(text)
     columns = [' '.join(parts) for parts in names]
     for b in banners:                          # a banner runs on over unnamed columns to its right
         while b['to'] + 1 < ncols and not columns[b['to'] + 1] and \
@@ -700,7 +716,7 @@ def read_text_table(header, rows):
     return columns, out_rows, banners, failures
 
 
-def table_block(headers, rows, report, where):
+def table_block(headers, rows, report, where, title='', fold=None):
     """Read one text table and note it in the report's `tables`. Returns its block, or None when
     a check failed (the failure is in the report's `errors`, and nothing is written on a guess)."""
     columns, cells, banners, failures = read_text_table(headers, rows)
@@ -714,9 +730,24 @@ def table_block(headers, rows, report, where):
         report['errors'].append(f'{where} (p{headers[0]["page"]}): the table under {shown!r} was not read: ' +
                                 '; '.join(failures))
         return None
+    if fold:
+        # A table set as several narrower ones side by side ("Skill | Probability" twice, to
+        # save height): the parts must carry the same names, and their rows follow one another.
+        n, rem = divmod(len(columns), fold)
+        parts = [columns[k * n:(k + 1) * n] for k in range(fold)] if not rem and n else []
+        if not parts or any(p_ != parts[0] for p_ in parts) or banners:
+            report['errors'].append(f'{where} (p{headers[0]["page"]}): the table under {shown!r} does not fold '
+                                    f'into {fold} parts with the same column names: {columns}')
+            note['failures'].append(f'does not fold into {fold} like parts')
+            return None
+        cells = [r[k * n:(k + 1) * n] for k in range(fold) for r in cells]
+        columns = parts[0]
+        # the names were printed once over each part and are kept once: say so, for the word count
+        report.setdefault('folded_keys', []).append({'region': shown, 'entry': where, 'cells': columns * (fold - 1)})
+        note.update(columns=columns, rows=cells, folded=fold)
     names = [c or next((f'{b["text"]} {i + 2 - b["columns"][0]}' for b in banners
                         if b['columns'][0] <= i + 1 <= b['columns'][1]), '') for i, c in enumerate(columns)]
-    block = {'type': 'table', 'title': '', 'columns': columns, 'rows': cells,
+    block = {'type': 'table', 'title': title, 'columns': columns, 'rows': cells,
              'data': table_data(names, cells, report, where)}
     if banners:
         block['banners'] = banners

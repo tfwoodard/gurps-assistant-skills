@@ -215,8 +215,8 @@ Each category folder in a `library-data/` holds:
   | tables        | `about` (one line), `roll` (`3d`, `1d`…, when it is a roll table); `kind: cross-reference` on a cross-reference |
   | attributes    | `kind` (basic, secondary), `abbreviation` (ST, HP…), `cost` (as printed: "±10 points/level") |
   | advantages    | `kind` (advantage, perk, language, cultural-familiarity, feature), `types` (as printed: mental, physical, social; exotic, supernatural), `cost` (as printed: "15 points", "5 points/level", "Variable"), `leveled` (true/false) |
-  | disadvantages | `kind` (disadvantage, quirk), `types`, `cost` (as printed), `self_control` (true when it takes a self-control number) |
-  | skills        | `kind` (skill, technique), `attribute` (DX, IQ…), `difficulty` (E, A, H, VH), `defaults` (as printed), `tl` (true for a /TL skill), `specialties` (true when a specialty is required) |
+  | disadvantages | `kind` (disadvantage, quirk), `types`, `cost` (as printed, its asterisk too), `self_control` (true when the cost carries the asterisk that marks a self-control number) |
+  | skills        | `kind` (skill, technique), `attribute` (as printed: DX, IQ, "DX or IQ"; a technique has none), `difficulty` (as printed: Easy, Average, Hard, Very Hard, Varies), `defaults` and `prerequisites` (as printed), `tl` (true for a /TL skill), `specialties` (true when the list marks the skill as taking a specialty), `printed_name` when the list prints marks after the name, `starred` (a technique whose name carries an asterisk) |
   | spells        | `kind` (spell, or the system's own word), `college`, `class` (as printed: Regular, Area, Missile…), `duration`, `cost`, `time_to_cast`, `prerequisites` (as printed) |
   | modifiers     | `kind` (enhancement, limitation), `cost` (as printed: "+50%", "−10%/level"), `applies_to` (the traits it is printed for, when it isn't general) |
   | templates     | `kind` (racial, occupational, meta-trait, lens), `points` |

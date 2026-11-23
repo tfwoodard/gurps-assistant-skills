@@ -301,6 +301,63 @@ class PrintedTwiceTest(unittest.TestCase):
         self.assertNotIn('printed_name', habits['small-habit-dry']['fields'])
 
 
+class SkillsTest(unittest.TestCase):
+    LABELS = {'Defaults': 'defaults', 'Default': 'defaults', 'Prerequisites': 'prerequisites'}
+
+    def chapter(self):
+        p = Page()
+        p.line('KNOWLEDGE LIST', size=20.0, heading=2, bold=True)
+        p.para('What keepers know.')
+        p.name('Lamp Tending/TL†')
+        p.cost('IQ/Average')
+        p.para('Defaults: IQ-5 or Wick Lore (same)-', '4.')
+        p.para('Prerequisites: Wick Lore.')
+        p.para('You keep a lamp lit.')
+        p.name('Rowing')
+        p.cost('DX or HT/Easy')
+        p.para('Default: DX-4.')
+        p.para('You row.')
+        p.name('Oar Craft')
+        p.cost('see Rowing, above')
+        p.line('TRICKS', size=20.0, heading=2, bold=True)
+        p.name('Quick Trim*')
+        p.cost('Hard')
+        p.para('Default: Lamp Tending-3.')
+        p.para('You trim a wick in a second.')
+        return {'lines': p.lines, 'regions': []}
+
+    def plan(self):
+        return {'source': 'ML', 'chapter': 'ch4', 'name_size': 14.0, 'cost_size': 11.0, 'icons': [], 'sections': [
+            {'heading': 'Knowledge List', 'page': 10, 'traits': {'category': 'skills', 'kind': 'skill', 'line': 'skill',
+                                                                 'marks': {'†': 'specialties', '/TL': 'tl'}, 'labels': self.LABELS}},
+            {'heading': 'Tricks', 'page': 10, 'traits': {'category': 'skills', 'kind': 'technique', 'line': 'technique',
+                                                         'marks': {'*': 'starred'}, 'labels': self.LABELS}}]}
+
+    def test_a_skills_line_marks_and_labelled_paragraphs_become_fields(self):
+        entries, report = convert_traits.convert_chapter(self.chapter(), self.plan())
+        self.assertEqual(report['errors'], [])
+        by = {e['slug']: e for c, e in entries if c == 'skills'}
+        self.assertEqual(by['lamp-tending']['name'], 'Lamp Tending')
+        self.assertEqual(by['lamp-tending']['fields'], {
+            'kind': 'skill', 'specialties': True, 'tl': True, 'printed_name': 'Lamp Tending/TL†', 'attribute': 'IQ',
+            'difficulty': 'Average', 'defaults': 'IQ-5 or Wick Lore (same)-4.', 'prerequisites': 'Wick Lore.'})
+        self.assertEqual([b['text'] for b in by['lamp-tending']['content']],
+                         ['Defaults: IQ-5 or Wick Lore (same)-4.', 'Prerequisites: Wick Lore.', 'You keep a lamp lit.'])
+        self.assertEqual(by['rowing']['fields'], {'kind': 'skill', 'specialties': False, 'tl': False,
+                                                  'attribute': 'DX or HT', 'difficulty': 'Easy', 'defaults': 'DX-4.'})
+        self.assertEqual(by['oar-craft']['fields'], {'kind': 'skill', 'specialties': False, 'tl': False, 'see': 'see Rowing, above'})
+        self.assertEqual(by['quick-trim']['fields'], {'kind': 'technique', 'starred': True, 'printed_name': 'Quick Trim*',
+                                                      'difficulty': 'Hard', 'defaults': 'Lamp Tending-3.'})
+        self.assertEqual(report['hyphens_kept'][0]['why'], 'a figure or an abbreviation')
+
+    def test_a_line_that_is_no_attribute_and_difficulty_is_an_error(self):
+        doc = self.chapter()
+        next(l for l in doc['lines'] if l['text'] == 'IQ/Average')['text'] = 'Quite hard'
+        _, report = convert_traits.convert_chapter(doc, self.plan())
+        self.assertIn("p10: 'Lamp Tending': the line under its name, 'Quite hard', is not an attribute and a difficulty",
+                      report['errors'])
+
+
 class NoCostLineTest(unittest.TestCase):
     def test_a_list_whose_text_gives_one_cost_for_all_takes_it_from_the_plan(self):
         p = Page()
