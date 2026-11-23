@@ -108,5 +108,54 @@ class AsideAndIconTest(unittest.TestCase):
         self.assertIn('FONT@SIZE', r.stderr)
 
 
+def draw_quote_with_source(path):
+    """A pull quote in large oblique type across the left and middle columns, its speaker under it,
+    and its story's title on two lines in large bold oblique, the first reaching well past the
+    quote's right edge, level with a right-column line. The same bold oblique face heads a section
+    lower down."""
+    c = canvas.Canvas(path, pagesize=A4)
+    w, h = A4
+
+    def body(x, rows, text):
+        c.setFont('Helvetica', 9)
+        for k in rows:
+            c.drawString(x, h - 100 - 11 * k, text)
+
+    body(50, range(0, 6), 'Keepers trim the wicks at dusk.')
+    body(220, range(0, 6), 'Gulls circle the tower all day.')
+    body(390, range(0, 40), 'The bell rings on in the fog.')
+    c.setFont('Helvetica-Oblique', 14)
+    c.drawString(80, h - 100 - 11 * 8, 'Keep the lamp lit.')
+    c.drawString(100, h - 100 - 11 * 8 - 16, '- The Old Keeper,')
+    c.setFont('Helvetica-BoldOblique', 14)
+    c.drawString(100, h - 100 - 11 * 8 - 32, 'The Tower at the End of')    # wider than the quote
+    c.drawString(100, h - 100 - 11 * 8 - 48, 'the World')
+    body(50, range(16, 24), 'Keepers trim the wicks at dusk.')
+    body(220, range(16, 40), 'Gulls circle the tower all day.')
+    c.setFont('Helvetica-BoldOblique', 14)
+    c.drawString(50, h - 100 - 11 * 26, 'Storm Watch')
+    body(50, range(28, 40), 'Light both lamps at the bell.')
+    c.showPage()
+    c.save()
+
+
+@unittest.skipUnless(HAVE_LIBS, 'reportlab is needed to draw the fixture PDF')
+class QuoteSourceTest(unittest.TestCase):
+    def test_the_source_under_a_quote_goes_with_it_and_the_face_elsewhere_does_not(self):
+        with tempfile.TemporaryDirectory() as d:
+            pdf, out = os.path.join(d, 'page.pdf'), os.path.join(d, 'layout.json')
+            draw_quote_with_source(pdf)
+            r = subprocess.run([sys.executable, os.path.join(SCRIPTS, 'pdf_layout.py'), pdf, '--pages', '1',
+                                '--out', out, '--aside-fonts', 'Helvetica-Oblique@14'], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            with open(out, encoding='utf-8') as f:
+                doc = json.load(f)
+        asides = [l['text'] for l in doc['lines'] if l.get('aside')]
+        self.assertEqual(asides, ['Keep the lamp lit.', '- The Old Keeper,', 'The Tower at the End of', 'the World'])
+        rest = [l['text'] for l in doc['lines'] if not l.get('aside')]
+        self.assertIn('Storm Watch', rest)
+        self.assertEqual(rest.count('The bell rings on in the fog.'), 40)
+
+
 if __name__ == '__main__':
     unittest.main()

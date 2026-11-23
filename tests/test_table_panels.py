@@ -25,11 +25,11 @@ import convert_traits  # noqa: E402
 COLS = (50, 220, 390)
 
 
-def draw_page(path):
+def draw_page(path, inset=1):
     """Three columns. Top: a trait's name and cost in the left column, and beside it, across the
     middle and right columns, its table on a white panel with two rows tinted. Mid-page: a large
     heading that fits inside the middle column, the other columns blank beside it, and text under
-    it in all three."""
+    it in all three. `inset`: how far the tinted rows stop short of the panel's right edge."""
     c = canvas.Canvas(path, pagesize=A4)
     w, h = A4
 
@@ -48,7 +48,7 @@ def draw_page(path):
     c.setLineWidth(12)
     c.setStrokeColorRGB(0.92, 0.88, 0.86)
     for y in (114, 136):
-        c.line(px0 + 1, h - y + 3, px1 - 1, h - y + 3)
+        c.line(px0 + 1, h - y + 3, px1 - inset, h - y + 3)
     c.setFillColorRGB(0, 0, 0)
     text(220, 103, 'Level', 'Helvetica-BoldOblique')
     text(300, 103, 'Reach', 'Helvetica-BoldOblique')
@@ -90,6 +90,17 @@ class PanelTest(unittest.TestCase):
         rows = [l['text'] for l in self.doc['lines'] if l.get('box') == '1.1']
         self.assertEqual(rows, ['Level Reach Throw', '0 (Usual) 6 feet 40 yards', '1 5 feet 30 yards',
                                 '2 4 feet 20 yards', '3 3 feet 10 yards'])
+
+    def test_tinted_rows_stopping_short_of_the_panels_edge_still_make_it_a_panel(self):
+        with tempfile.TemporaryDirectory() as d:
+            pdf, out = os.path.join(d, 'page.pdf'), os.path.join(d, 'layout.json')
+            draw_page(pdf, inset=6)                    # inside the panel's margin, nearly its whole width
+            r = subprocess.run([sys.executable, os.path.join(SCRIPTS, 'pdf_layout.py'), pdf, '--pages', '1',
+                                '--boxes', '--out', out], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            with open(out, encoding='utf-8') as f:
+                doc = json.load(f)
+        self.assertEqual([(r['id'], r.get('bands')) for r in doc['regions']], [('1.1', True)])
 
     def test_the_columns_beside_and_under_the_panel_are_still_found(self):
         self.assertEqual(len(self.doc['gutters']['1']), 2)

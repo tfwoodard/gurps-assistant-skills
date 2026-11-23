@@ -683,6 +683,41 @@ class MixedListTest(unittest.TestCase):
         self.assertEqual([(b['type'], b.get('text') or b.get('title')) for b in owner['content']][-2:],
                          [('paragraph', 'Lamps the keepers use.'), ('table', 'Lamp Table')])
 
+    def panel(self, boxplan):
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from test_text_tables import line as text_line
+        doc = self.doc()
+        box = [mini_line('Lamp Table', 300.0, 14.0, box='10.1'),
+               text_line(316.0, [(60, 'Lamp'), (110, 'Oil'), (200, 'Keepers')], True),
+               text_line(327.0, [(60, 'None'), (110, 'No lamp is lit.')]),
+               text_line(338.0, [(60, 'Small'), (110, '1 pint'), (200, '1')]),
+               text_line(349.0, [(60, 'Great'), (110, '4 pints'), (200, '2')]),
+               text_line(363.0, [(60, 'Or count a pint for each foot of tower.')])]
+        for l in box[1:]:
+            l.update(box='10.1', column='full')
+        doc['lines'] += box
+        doc['regions'] = [{'id': '10.1', 'kind': 'box', 'page': 10, 'bands': True, 'bbox': [50, 285, 300, 370]}]
+        plan = {'source': 'ML', 'chapter': 'ch1', 'name_size': 14.0, 'cost_size': 11.0, 'icons': [], 'indent': False,
+                'sections': [{'heading': 'Lamp Features', 'page': 10, 'traits': {'category': 'by-cost', 'kind': 'trait'}}],
+                'boxes': {'10.1': dict({'into': 'rules/lamp-features', 'title_lines': 1}, **boxplan)}}
+        entries, report = convert_traits.convert_chapter(doc, plan)
+        return next(e for c, e in entries if e['slug'] == 'lamp-features'), report
+
+    def test_a_panels_last_lines_go_after_its_table_and_a_blank_it_prints_is_named(self):
+        owner, report = self.panel({'after_lines': 1, 'empty_cells': [[1, 3]]})
+        self.assertEqual(report['errors'], [])
+        self.assertEqual([(b['type'], b.get('text') or b.get('title')) for b in owner['content']][-2:],
+                         [('table', 'Lamp Table'), ('paragraph', 'Or count a pint for each foot of tower.')])
+        self.assertEqual(owner['content'][-2]['rows'][0], ['None', 'No lamp is lit.', ''])
+        self.assertEqual(report['tables'][0]['blank_as_printed'], [[1, 3]])
+
+    def test_a_blank_not_named_fails_and_so_does_one_named_that_is_not_blank(self):
+        _, report = self.panel({'after_lines': 1})
+        self.assertTrue(any('row 1 has nothing in column 3' in e for e in report['errors']), report['errors'])
+        _, report = self.panel({'after_lines': 1, 'empty_cells': [[1, 3], [2, 3]]})
+        self.assertTrue(any("row 2, column 3 is listed as printed blank, but it is not: '1'" in e for e in report['errors']),
+                        report['errors'])
+
     def test_entries_of_one_name_are_told_apart_by_page_in_the_plan(self):
         doc = {'pages': [10, 11], 'body_size': 9.5, 'gutters': {}, 'lines': [
             mini_line('Lamp Log', 60.0, 14.0, 3, box='10.1'), mini_line('Day one: lit at dusk.', 76.0, box='10.1'),
