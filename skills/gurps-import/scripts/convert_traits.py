@@ -91,9 +91,10 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from entry_text import (blocks_from_lines, fix_case, is_table_header, mark_paragraphs, marked, plain,  # noqa: E402
-                        slugify, table_block, vocabulary, with_keyed_lists, with_text_tables)
+from entry_text import (SMALL_WORDS, blocks_from_lines, fix_case, is_table_header, mark_paragraphs,  # noqa: E402
+                        marked, plain, slugify, table_block, vocabulary, with_keyed_lists, with_text_tables)
 from render_entry import render  # noqa: E402
+from equipment_tables import take_tables  # noqa: E402
 
 # fields that hold words printed on the page
 PRINTED_FIELDS = ('cost', 'types', 'see', 'attribute', 'difficulty', 'printed_name', 'class', 'resisted', 'points')
@@ -116,14 +117,24 @@ def heading_text(run):
     return ' '.join(plain(marked(l)) for l in run)
 
 
+def joining_words(l):
+    """A heading line of nothing but small joining words ("AND", set smaller between "LAMPS" and
+    "LANTERNS")."""
+    words = plain(l['text']).lower().split()
+    return bool(words) and all(w in SMALL_WORDS or w == '&' for w in words)
+
+
 def group_headings(lines, is_heading):
     """[(kind, run of lines)]: consecutive heading lines of one size, close together, are one
-    heading; every other line is its own run."""
+    heading, and so are the lines either side of a line of joining words set in another size;
+    every other line is its own run."""
     out = []
     for l in lines:
-        if is_heading(l) and out and out[-1][0] == 'heading' and near(out[-1][1][-1]['size'], l['size']) and \
-                out[-1][1][-1]['page'] == l['page'] and out[-1][1][-1]['column'] == l['column'] and \
-                0 < l['baseline'] - out[-1][1][-1]['baseline'] < 1.6 * l['size']:
+        prev = out[-1][1][-1] if out and out[-1][0] == 'heading' else None
+        alike = prev is not None and (near(prev['size'], l['size']) or joining_words(l) or
+                                      (joining_words(prev) and len(out[-1][1]) > 1 and near(out[-1][1][-2]['size'], l['size'])))
+        if is_heading(l) and alike and prev['page'] == l['page'] and prev['column'] == l['column'] and \
+                0 < l['baseline'] - prev['baseline'] < 1.6 * max(l['size'], prev['size']):
             out[-1][1].append(l)
         else:
             out.append(('heading' if is_heading(l) else 'line', [l]))
@@ -182,13 +193,15 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None):
     vocab |= {w.lower() for w in plan.get('whole_words', [])}      # and broken words the plan says are one word
     vocab |= {w.lower() for w in plan.get('hyphenated_words', [])}  # or says keep their hyphen
     vocab.dictionary = frozenset(dictionary or ())    # English words, for what the book prints nowhere else
+    # the equipment tables the plan names: entries of their own, out of the text
+    lines, table_entries = take_tables(lines, plan, report, vocab, source, chapter)
     if plan.get('indent', True):
         mark_paragraphs(lines)
     body = [l for l in lines if not l.get('box')]
     not_traits = {(n['page'], n['text']) for n in plan.get('not_traits', [])}
     trait_sections = {(s['page'], s['heading'].lower()): s for s in plan.get('sections', [])}
     used_sections = set()
-    entries = []           # (category, entry)
+    entries = list(table_entries)           # (category, entry)
 
     def add(category, name, first, section, fields, content_lines, level, base_size, extra=None):
         where = f'{category}/{slugify(name)}'
@@ -449,6 +462,13 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None):
             # A table on a tinted panel of its own, set beside or under the trait it belongs to
             # and often wider than a column. The page does not say whose it is; the plan does.
             target = bp.get('into')
+            if not target and bp.get('name'):
+                # a table panel that is an entry of its own: a rules entry of that name holding it
+                own ={'slug': slugify(bp['name']), 'name': bp['name'], 'source': source, 'chapter': chapter,
+                       'section': bp.get('section', bp['name']), 'page': bl[0]['page'],
+                       'fields': dict(plan.get('rules_fields', {}), box=True), 'level': 2, 'content': []}
+                entries.append(('rules', own))
+                target = f'rules/{own["slug"]}'
             owner = next((e for c, e in entries if f'{c}/{e["slug"]}' == target), None)
             if owner is None:
                 report['errors'].append(

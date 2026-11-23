@@ -510,14 +510,21 @@ def make_line(ws, page_no, column, height):
             'furniture': furniture}
 
 
-def order_lines(words, gutters, page_no, height):
-    """Words of one region -> lines in reading order: split at the gutters, then read in bands."""
+def order_lines(words, gutters, page_no, height, full_rows=frozenset(), blocks=()):
+    """Words of one region -> lines in reading order: split at the gutters, then read in bands.
+    `blocks` are [(words, gutters)]: a stretch of the region read on its own, with gutters of its
+    own (the notes under a table across the page, set in two columns on a page of three). Like a
+    full-width line, each ends a band."""
+    in_block = {id(w) for ws, _ in blocks for w in ws}
     rows = collections.defaultdict(list)
     for w in words:
-        rows[w['baseline']].append(w)
+        if id(w) not in in_block:
+            rows[w['baseline']].append(w)
     segs = []                       # (baseline, column, words)
     for b, raw in rows.items():
-        for col, ws in segments(sorted(raw, key=lambda w: w['x0']), gutters):
+        # (a row of a table set across the page is one line, whatever gaps its columns leave)
+        for col, ws in ([('full', raw)] if any(id(w) in full_rows for w in raw) else
+                        segments(sorted(raw, key=lambda w: w['x0']), gutters)):
             segs.append((b, col, ws))
     segs.sort(key=lambda s: s[0])
     # A display heading (three times the text's size or more) that stands alone at its height,
@@ -530,13 +537,15 @@ def order_lines(words, gutters, page_no, height):
         if col != 'full' and gutters and usual and big >= DISPLAY_HEADING * usual and \
                 not any(o is not segs[k] and b - 0.8 * big <= o[0] <= b + 0.2 * big for o in segs):
             segs[k] = (b, 'full', ws)
-    # A full-width line ends a band; within a band, read the columns left to right.
-    bounds = sorted({b for b, c, _ in segs if c == 'full'}) + [float('inf')]
+    # A full-width line or a block ends a band; within a band, read the columns left to right.
+    stops = [(b, [make_line(ws, page_no, 'full', height)]) for b, c, ws in segs if c == 'full']
+    stops += [(min(w['baseline'] for w in ws), order_lines(ws, g, page_no, height)) for ws, g in blocks if ws]
+    stops.sort(key=lambda s: s[0])
     out, prev = [], float('-inf')
-    for bnd in bounds:
+    for bnd, lines in stops + [(float('inf'), [])]:
         for side in column_names(len(gutters)):
             out += [make_line(ws, page_no, side, height) for b, c, ws in segs if c == side and prev <= b < bnd]
-        out += [make_line(ws, page_no, 'full', height) for b, c, ws in segs if c == 'full' and b == bnd]
+        out += lines
         prev = bnd
     return out
 
@@ -651,6 +660,137 @@ def banded_panels(page):
                for b in bands):
             out.append((max(0.0, r['x0']), max(0.0, r['top']), min(page.width, r['x1']), min(page.height, r['bottom'])))
     return out
+
+
+def table_rows(page, words, boxes):
+    """Words in the rows of a table set across the page, outside any box: the table's tinted rows
+    are thick strokes, three or more one above another, each wider than half the page. Its rows,
+    from a few lines above the first stroke (its title, header and first group) to a line below
+    the last, are read as whole lines, so the gaps between its columns are not taken for the
+    page's gutters. Returns the ids of those words."""
+    bands = [l for l in page.lines if abs(l['top'] - l['bottom']) < 1 and (l.get('linewidth') or 0) > RULE_MAX_WIDTH
+             and l['x1'] - l['x0'] > 0.5 * page.width and
+             not any(b[0] - 2 <= l['x0'] and l['x1'] <= b[2] + 2 and b[1] <= l['top'] <= b[3] for b in boxes)]
+    stacks = collections.defaultdict(list)
+    for b in bands:
+        stacks[(round(b['x0'] / 4), round(b['x1'] / 4))].append(b)
+    out, regions = set(), []
+    for stack in stacks.values():
+        if len(stack) < 3:
+            continue
+        x0, x1 = min(b['x0'] for b in stack), max(b['x1'] for b in stack)
+        sizes = sorted(max(c['size'] for c in w['chars']) for w in words) or [10]
+        line = 1.2 * sizes[len(sizes) // 2]
+        top = min(b['top'] for b in stack) - (b_w := max(b.get('linewidth') or 0 for b in stack)) - 4 * line
+        bottom = max(b['bottom'] for b in stack) + b_w + line
+        out |= {id(w) for w in words if x0 - 2 <= (w['x0'] + w['x1']) / 2 <= x1 + 2 and top <= w['baseline'] <= bottom}
+        regions.append((x0, x1, bottom, line, max(b['bottom'] for b in stack) + b_w / 2))
+    return out, regions
+
+
+def across(ws, g):
+    """True when a line's words run across the gutter at `g`: a word over it, or words either side
+    of it only a word space apart."""
+    ws = sorted(ws, key=lambda w: w['x0'])
+    return any(w['x0'] < g - 1 and w['x1'] > g + 1 for w in ws) or \
+        any(a['x1'] <= g <= b['x0'] and b['x0'] - a['x1'] < 0.8 * word_size(a) for a, b in zip(ws, ws[1:]))
+
+
+def below_the_rows(words, regions, gutters, taken):
+    """Of the words `table_rows` took, those on the last lines under a table's last stroke that
+    read as the page's columns, not as an untinted last row: they run across none of the page's
+    gutters, and in each column their words are a word space apart (a row's cells are set
+    further apart). A "Notes" heading level with the next column's text is one. Only lines below
+    every row are given back to the columns."""
+    out = set()
+    if not gutters:
+        return out
+    rows = collections.defaultdict(list)
+    for w in words:
+        if id(w) in taken:
+            rows[round(w['baseline'])].append(w)
+    edges = [float('-inf')] + list(gutters) + [float('inf')]
+
+    def prose(ws):
+        if any(across(ws, g) for g in gutters):
+            return False
+        for i in range(len(edges) - 1):
+            part = sorted((w for w in ws if edges[i] <= (w['x0'] + w['x1']) / 2 < edges[i + 1]), key=lambda w: w['x0'])
+            if any(b['x0'] - a['x1'] >= 0.8 * word_size(a) for a, b in zip(part, part[1:])):
+                return False
+        return True
+
+    for x0, x1, bottom, line, last in regions:
+        for b in sorted((b for b in rows if last < b <= bottom), reverse=True):
+            if not prose(rows[b]):
+                break
+            out |= {id(w) for w in rows[b]}
+    return out
+
+
+def under_tables(words, regions, taken):
+    """For each table set across the page, the lines directly under its last row, each no further
+    below the one before than a line and a half: [(baseline, words)] per table."""
+    rows = collections.defaultdict(list)
+    for w in words:
+        if id(w) not in taken:
+            rows[round(w['baseline'])].append(w)
+    runs = []
+    for x0, x1, bottom, line, _ in regions:
+        run, last = [], bottom
+        for b, ws in sorted(rows.items()):
+            if b <= bottom - line:
+                continue
+            # (a line with nothing at the table's left edge is the page's columns again: a note,
+            # or a heading over them, starts there, or carries on from a line that did)
+            if b - last > 1.6 * line or not any(w['x0'] < x0 + 2 * line for w in ws):
+                break
+            run.append((b, ws))
+            last = b
+        runs.append(run)
+    return runs
+
+
+def table_notes(words, regions, gutters, taken):
+    """The notes under each table set across the page: the lines directly under its last row
+    (each no further below the one before than a line and a half) that are set across the page's
+    gutters. A line that crosses none is a note's short last line when it ends the block (a wider
+    gap or nothing follows) or the next line crosses again; two such lines in a row are the
+    columns starting. Returns [(words, gutters)], one per table that has notes, for
+    `order_lines`' blocks: the notes may be set in columns of their own, which their words show."""
+    out = []
+    for (x0, x1, _, _, _), run in zip(regions, under_tables(words, regions, taken)):
+        # (a page of tables shows no gutters: whatever lies under a table is its notes)
+        crosses = [not gutters or any(across(ws, g) for g in gutters) for _, ws in run]
+        ws_in = []
+        for i, (b, ws) in enumerate(run):
+            if not crosses[i] and not (i + 1 == len(run) or crosses[i + 1]):
+                break
+            ws_in += ws
+        if ws_in:
+            out.append((ws_in, find_gutters(ws_in, x1 - x0, x0, three=False)))
+    return out
+
+
+def panel_notes(page, box, words):
+    """The notes under a table on a tinted panel of its own: the panel's lines under its last
+    stripe of tint (but an untinted last row), for `order_lines`' blocks, read with the columns
+    their own words show. Returns [] when the panel has fewer than three stripes."""
+    px0, ptop, px1, pbottom = box
+    bands = [l for l in page.lines if abs(l['top'] - l['bottom']) < 1 and (l.get('linewidth') or 0) > RULE_MAX_WIDTH
+             and px0 - 2 <= l['x0'] and l['x1'] <= px1 + 2 and ptop <= l['top'] <= pbottom]
+    if len(bands) < 3 or not words:
+        return []
+    sizes = sorted(max(c['size'] for c in w['chars']) for w in words)
+    line = 1.2 * sizes[len(sizes) // 2]
+    b_w = max(b.get('linewidth') or 0 for b in bands)
+    x0, x1 = min(b['x0'] for b in bands), max(b['x1'] for b in bands)
+    last = max(b['bottom'] for b in bands) + b_w / 2
+    region = [(x0, x1, last + b_w / 2 + line, line, last)]
+    taken = {id(w) for w in words if w['baseline'] <= region[0][2]}
+    below = [w for w in words if w['baseline'] > last]
+    taken -= below_the_rows(words, region, find_gutters(below, x1 - x0, x0, three=False) if below else [], taken)
+    return table_notes(words, region, [], taken)
 
 
 def outermost(boxes):
@@ -928,13 +1068,18 @@ def page_lines(page, page_no, icon_fonts=(), marks=None, shapes=None, regions=No
     body = [w for w in words if id(w) not in in_box]
     sizes = sorted(c['size'] for w in body for c in w['chars'])
     usual_size = sizes[len(sizes) // 2] * 1.4 if sizes else 0
-    gutters = gutters_under_a_standfirst([w for w in body if w['top'] >= page.height * MARGIN_TOP and
+    # A table set across the page hides the gutters with its rows; the text around it shows them.
+    # Its notes, under it, cross them too, so the lines directly under a table are left out of
+    # the search; which of them are notes is settled once the gutters are known.
+    full_rows, table_regions = table_rows(page, body, boxes)
+    hidden = full_rows | {id(w) for run in under_tables(body, table_regions, full_rows) for _, ws in run for w in ws}
+    gutters = gutters_under_a_standfirst([w for w in body if id(w) not in hidden and w['top'] >= page.height * MARGIN_TOP and
                                           w['bottom'] <= page.height * (1 - MARGIN_BOTTOM) and
                                           max(c['size'] for c in w['chars']) <= usual_size], page.width)
     if usual and len(gutters) < len(usual):
         # The book's usual gutters, where this page's own body words leave each one clear (a
         # crossing line or so allowed, as when a gutter is found) and stand on both sides of one.
-        sized = [w for w in body if w['top'] >= page.height * MARGIN_TOP and
+        sized = [w for w in body if id(w) not in hidden and w['top'] >= page.height * MARGIN_TOP and
                  w['bottom'] <= page.height * (1 - MARGIN_BOTTOM) and max(c['size'] for c in w['chars']) <= usual_size]
         rows = len({round(w['baseline']) for w in sized})
         crossing = [sum(1 for w in sized if w['x0'] < g - 1 and w['x1'] > g + 1) for g in usual]
@@ -951,7 +1096,9 @@ def page_lines(page, page_no, icon_fonts=(), marks=None, shapes=None, regions=No
             gutters = list(usual)
             if used_usual is not None:
                 used_usual.append(True)
-    out = order_lines(body, gutters, page_no, page.height)
+    full_rows = full_rows - below_the_rows(body, table_regions, gutters, full_rows)
+    out = order_lines(body, gutters, page_no, page.height, full_rows,
+                      table_notes(body, table_regions, gutters, full_rows))
     keep_run_on(out, page_no, page.height)
     if aside_chars:
         asides = order_lines(make_words(aside_chars, page.height), (), page_no, page.height)
@@ -968,7 +1115,20 @@ def page_lines(page, page_no, icon_fonts=(), marks=None, shapes=None, regions=No
         # A box is one or two columns; a table's columns inside it are not text columns.
         # ...and a table on a tinted panel has no text columns at all: each row is one line.
         inner = () if box in panels else find_gutters(bw, box[2] - box[0], box[0], three=False)
-        bl = order_lines(bw, inner, page_no, page.height)
+        if not inner and box not in panels:
+            # A box's columns can sit under a lead-in set across it, as a page's can: columns of
+            # three lines or more on each side, not a short last line beside a blank.
+            g = gutters_under_a_standfirst(bw, box[2] - box[0], box[0], three=False)
+            if g:
+                by_line = collections.defaultdict(list)
+                for w in bw:
+                    by_line[round(w['baseline'])].append(w)
+                clear = [ws for ws in by_line.values() if not any(w['x0'] < g[0] < w['x1'] for w in ws)]
+                lefts = sum(1 for ws in clear if any(w['x1'] <= g[0] for w in ws))
+                rights = sum(1 for ws in clear if any(w['x0'] >= g[0] for w in ws))
+                if lefts >= 3 and rights >= 3:
+                    inner = g
+        bl = order_lines(bw, inner, page_no, page.height, blocks=panel_notes(page, box, bw) if box in panels else ())
         parts = titled_tables(page, box, bl)
         for k, (sub, sl) in enumerate(parts):
             sid = bid if len(parts) == 1 else f'{bid}.{k + 1}'

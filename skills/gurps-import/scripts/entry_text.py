@@ -411,7 +411,9 @@ def blocks_from_lines(lines, report, where, vocab=None, base_level=None, field_l
                 flush()
             items.append([strip_bullet(text)])
             bullet_x0 = l['x0']
-        elif items and prev is not None and not new_paragraph(l, prev) and l['x0'] > bullet_x0 + 1:
+        elif items and prev is not None and not new_paragraph(l, prev) and abs(l['x0'] - bullet_x0) > 1:
+            # (an item's later lines hang under its words, or, where the bullet is set in like a
+            # paragraph's first line, run back to the margin)
             items[-1].append(text)
         else:
             if items or new_paragraph(l, prev) or ends_fields(run, l, field_labels):
@@ -679,6 +681,15 @@ def read_text_table(header, rows):
         for ph in phrases:
             x0, x1 = ph[0][1], ph[-1][2]
             over = [c for c in range(ncols) if min(x1, extent[c][1]) - max(x0, extent[c][0]) >= 0.4 * size]
+            # Names set close together, each starting where its column's cells start ("Rank
+            # Examples" over a column of figures and one of examples), are each column's own.
+            starts = [next((i for i, w in enumerate(ph) if abs(w[1] - extent[c][0]) <= ALIGN_TOLERANCE), None)
+                      for c in over]
+            if len(over) >= 2 and starts[0] == 0 and None not in starts and starts == sorted(set(starts)):
+                for k, c in enumerate(over):
+                    part = ph[starts[k]:starts[k + 1] if k + 1 < len(over) else len(ph)]
+                    spans.append((part, part[0][1], part[-1][2], [c]))
+                continue
             spans.append((ph, x0, x1, over))
         own = set()                    # columns with a phrase of their own on this line
         for ph, x0, x1, over in spans:
@@ -722,7 +733,21 @@ def read_text_table(header, rows):
     banners = [{'text': b['text'], 'columns': [b['from'] + 1, b['to'] + 1]} for b in banners]
 
     # --- the rows ---------------------------------------------------------------------------
-    out_rows = [[' '.join(w[0] for w in c) for c in r] for r in grid]
+    # A line with nothing in the first column, under a row, carries on that row's cells (a cell
+    # too long for its column: "special – see" / "the notes"). Its words join the row's; only a
+    # row's first line is held to the alignment check.
+    first_lines, merged = [], []
+    for r, l in zip(grid, rows):
+        if merged and not r[0] and any(r[1:]):
+            for c in range(ncols):
+                merged[-1][0][c] = merged[-1][0][c] + r[c]
+            merged[-1][1].append(l)
+        else:
+            merged.append(([list(c) for c in r], [l]))
+            first_lines.append(r)
+    out_rows = [[' '.join(w[0] for w in c) for c in r] for r, _ in merged]
+    rows = [ls[0] for _, ls in merged]
+    grid = first_lines
     for i, r in enumerate(out_rows):
         if any(not c for c in r):
             failures.append(f'row {i + 1} has nothing in column {r.index("") + 1}: {rows[i]["text"]!r}')

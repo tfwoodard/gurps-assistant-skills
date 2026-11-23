@@ -603,5 +603,24 @@ class ParagraphTest(unittest.TestCase):
         self.assertEqual([m for _, m in self.marks(build)], [True, False, False, True])
 
 
+class HeadingLinesTest(unittest.TestCase):
+    def head(self, text, size, baseline):
+        return {'page': 10, 'column': 'right', 'text': text, 'size': size, 'baseline': baseline, 'heading': 2,
+                'spans': [{'text': text, 'size': size, 'bold': True, 'italic': False}]}
+
+    def runs(self, lines):
+        return [(k, [l['text'] for l in run]) for k, run in convert_traits.group_headings(lines, lambda l: bool(l.get('heading')))]
+
+    def test_a_line_of_joining_words_set_smaller_joins_the_lines_either_side(self):
+        lines = [self.head('LAMPS', 20.0, 70.0), self.head('AND', 15.0, 90.0), self.head('LANTERNS', 20.0, 110.0)]
+        self.assertEqual(self.runs(lines), [('heading', ['LAMPS', 'AND', 'LANTERNS'])])
+        self.assertEqual(convert_traits.heading_text(convert_traits.group_headings(lines, lambda l: True)[0][1]),
+                         'LAMPS AND LANTERNS')
+
+    def test_a_smaller_heading_of_its_own_stays_apart(self):
+        lines = [self.head('LAMPS', 20.0, 70.0), self.head('Wicks', 15.0, 90.0), self.head('LANTERNS', 20.0, 110.0)]
+        self.assertEqual(self.runs(lines), [('heading', ['LAMPS']), ('heading', ['Wicks']), ('heading', ['LANTERNS'])])
+
+
 if __name__ == '__main__':
     unittest.main()

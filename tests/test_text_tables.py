@@ -156,6 +156,16 @@ class TextTableTest(unittest.TestCase):
         self.assertEqual(block['banners'], [{'text': 'Wounding Tide Multiplier', 'columns': [2, 4]}])
         self.assertEqual(block['data'][0], {'rarity_of_fog': 'Rare', 'x2': -10, 'x3': -15, 'x4': -20})
 
+    def test_names_set_close_together_each_over_its_columns_cells_are_names_not_a_banner(self):
+        lines = [line(200.0, [(60, 'Rank'), (60 + 0.5 * SIZE * 5 + 2, 'Examples'), (180, 'Upkeep')], True),
+                 line(211.0, [(60, '3'), (60 + 0.5 * SIZE * 5 + 2, 'Lamp warden, keeper'), right(220, '$900')]),
+                 line(222.0, [(60, '2'), (60 + 0.5 * SIZE * 5 + 2, 'Wick trimmer'), right(220, '$30')])]
+        out, report = self.read(lines)
+        self.assertEqual(report['errors'], [])
+        block = out[0]['block']
+        self.assertEqual(block['columns'], ['Rank', 'Examples', 'Upkeep'])
+        self.assertNotIn('banners', block)
+
     def test_a_banner_runs_on_over_unnamed_columns_which_take_their_names_from_it(self):
         lines = [line(200.0, [(60, 'Level'), (110, 'Aging [Frequency of Rolls]')], True),
                  line(211.0, [(60, '0'), (110, '50 years'), (200, '70 years'), (290, '90 years')]),
@@ -214,6 +224,16 @@ class TextTableTest(unittest.TestCase):
         t = table([[(70, 'one two three four')], [(70, 'five six seven eight')]], [(70, 'Reach'), (160, 'Cost')])
         _, report = self.read(t)
         self.assertIn('its rows leave no blank column between them', report['errors'][0])
+
+    def test_a_cell_carried_onto_a_second_line_joins_its_row(self):
+        t = table([[(70, 'cut'), (130, 'cutting')],
+                   [(70, 'spec.'), (130, 'special – see')],
+                   [(136, 'the notes')],
+                   [(70, 'tox'), (130, 'toxic')]],
+                  [(70, 'Abbr.'), (130, 'Damage Type')])
+        out, report = self.read(t)
+        self.assertEqual(report['errors'], [])
+        self.assertEqual(out[0]['block']['rows'], [['cut', 'cutting'], ['spec.', 'special – see the notes'], ['tox', 'toxic']])
 
     def test_a_header_with_no_words_over_a_column_fails(self):
         t = table([[(70, '1 mile'), right(190, '2 points')], [(70, '10 miles'), right(190, '5 points')]],
