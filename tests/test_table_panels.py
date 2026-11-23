@@ -140,6 +140,16 @@ class PanelTest(unittest.TestCase):
         _, report = convert_traits.convert_chapter(doc, plan)
         self.assertTrue(any('box 1.1 (p1) is a table on a panel of its own' in e and 'with `into`' in e for e in report['errors']))
 
+    def test_a_panel_the_plan_names_is_a_rules_entry_of_its_own(self):
+        doc = json.loads(json.dumps(self.doc))
+        plan = {'source': 'ML', 'chapter': 'ch3', 'name_size': 14.0, 'cost_size': 11.0, 'icons': [], 'intro': {'name': 'Flaws'},
+                'boxes': {'1.1': {'name': 'Reach Table'}}}
+        entries, report = convert_traits.convert_chapter(doc, plan)
+        self.assertFalse([e for e in report['errors'] if 'box 1.1' in e])
+        e = next(e for c, e in entries if c == 'rules' and e['slug'] == 'reach-table')
+        self.assertEqual((e['name'], e['fields']['box'], [b['type'] for b in e['content']]), ('Reach Table', True, ['table']))
+        self.assertEqual(e['content'][0]['columns'], ['Level', 'Reach', 'Throw'])
+
 
 if __name__ == '__main__':
     unittest.main()

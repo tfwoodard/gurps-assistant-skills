@@ -212,7 +212,7 @@ Each category folder in a `library-data/` holds:
   | Category      | Extra index fields |
   |---------------|--------------------|
   | rules         | `kind` (maneuver, condition, procedure, glossary, optional), `aliases` |
-  | tables        | `about` (one line), `roll` (`3d`, `1d`…, when it is a roll table); `kind: cross-reference` on a cross-reference |
+  | tables        | `about` (one line), `roll` (`3d`, `1d`…, when it is a roll table); `kind: cross-reference` on a cross-reference, `kind: equipment` on a weapon, armor or shield table whose items are `equipment` entries |
   | attributes    | `kind` (basic, secondary), `abbreviation` (ST, HP…), `cost` (as printed: "±10 points/level") |
   | advantages    | `kind` (advantage, perk, talent, language, cultural-familiarity, feature), `types` (as printed: mental, physical, social; exotic, supernatural), `cost` (as printed: "15 points", "5 points/level", "Variable"), `leveled` (true/false), `see` (for a pointer to another trait, as printed) |
   | disadvantages | `kind` (disadvantage, quirk), `types`, `cost` (as printed, its asterisk too), `self_control` (true when the cost carries the asterisk that marks a self-control number) |
@@ -220,7 +220,7 @@ Each category folder in a `library-data/` holds:
   | spells        | `kind` (spell, or the system's own word), `college`, `class` (as printed: Regular, Area, "Information; Area"…), `resisted` (as printed: "Resisted by HT"), `duration`, `cost`, `base_cost` (an Area spell's), `time_to_cast`, `prerequisites`, `modifiers` (each as printed, from the spell's labelled lines), `very_hard` (true for a spell printed with "(VH)"), `printed_name` when it is |
   | modifiers     | `kind` (enhancement, limitation), `cost` (as printed: "+50%", "−10%/level"), `applies_to` (the traits it is printed for, when it isn't general) |
   | templates     | `kind` (racial, occupational, meta-trait, lens), `points` (as printed: "100 points", "Variable"), `types` when the book marks them, and its labelled lists as printed (`attributes`, `secondary_characteristics`, `attribute_modifiers`, `secondary_characteristic_modifiers`, `advantages`, `disadvantages`, `primary_skills`, `secondary_skills`, `background_skills`, `features`). A meta-trait the book describes inside a group entry ("Body of Air" under Elemental Meta-Traits) is an entry of its own that `adds-to` the group |
-  | equipment     | `kind` (melee-weapon, ranged-weapon, armor, shield, gear, vehicle, …), `tl`, `cost`, `weight`, `lc` |
+  | equipment     | `kind` (melee-weapon, ranged-weapon, firearm, heavy-weapon, grenade, armor, shield, gear, vehicle, …), `group` (each table group it is printed in, as printed: a skill with its defaults, or a kind of armor), and its first table row's cells, keyed by the table's column names as printed (`tl`, `cost`, `weight`, `lc`, `damage`, `reach`, `parry`, `st`, `acc`, `range`, `rof`, `shots`, `bulk`, `rcl`, `dr`, `location`, `notes`…), with `modes` when it has more than one row |
   | creatures     | `kind` (animal, monster, npc), `attributes` (the stat line as printed: ST, DX, IQ, HT, and whatever else it gives) |
   | lore          | `kind` (place, organisation, history, other) |
 
@@ -278,8 +278,15 @@ GM.
 `fields` holds the index fields and any other values a tool needs, taken from
 the source's words: a skill's `prerequisites`, a weapon's table line (`damage`,
 `reach`, `parry`, `st`, or `acc`, `range`, `rof`, `shots`, `bulk`, `rcl`, each
-as printed, one object per mode under `modes` when it has several), an armor's
-`dr` and `locations`, a template's trait lists as printed.
+as printed), an armor's `dr` and `location`, a template's trait lists as
+printed. An item printed in several rows (a weapon's attack modes, a spear in
+the melee and the thrown tables) has every row under `modes`, each keyed by its
+own table's columns, with `table` naming the table when they come from more
+than one; a row that only gives another mode leaves the item's cells empty, so
+a mode lacks the keys it doesn't print. The `notes` cell cites the table's
+numbered notes ("[1, 3]"); the entry's content lists the notes it cites, with
+their numbers as `keys`. The table itself is a `tables` entry (`kind:
+equipment`): each group a heading and a table, then the notes.
 
 `gca` links the entry to its GCA definitions (§12). The numbers a character is
 built with come from there, not from `fields`: `fields` records what the book

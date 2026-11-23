@@ -191,6 +191,20 @@ class BulletTest(unittest.TestCase):
         self.assertEqual(entry_text.strip_bullet('• **Oil**: 2'), '**Oil**: 2')
         self.assertEqual(entry_text.strip_bullet('• plain item'), 'plain item')
 
+    def test_an_items_lines_may_hang_under_it_or_run_back_to_the_margin(self):
+        def line(text, baseline, x0, para):
+            return {'page': 1, 'column': 'left', 'text': text, 'size': 10.0, 'baseline': baseline, 'x0': x0, 'x1': 200.0,
+                    'bold': False, 'italic': False, 'para': para,
+                    'spans': [{'text': text, 'size': 10.0, 'bold': False, 'italic': False}]}
+        for later_x0 in (62.0, 50.0):                    # hanging under the words; back at the margin
+            lines = [line('• A wick trimmer, kept by', 100.0, 56.0, True), line('the door.', 112.0, later_x0, False),
+                     line('• A can of oil.', 124.0, 56.0, True),
+                     line('Both are checked each month.', 140.0, 56.0, True)]
+            blocks = entry_text.blocks_from_lines(lines, {'questions': [], 'dehyphenated': []}, 'page 1')
+            self.assertEqual(blocks, [{'type': 'list', 'ordered': False, 'items': ['A wick trimmer, kept by the door.',
+                                                                                    'A can of oil.']},
+                                      {'type': 'paragraph', 'text': 'Both are checked each month.'}])
+
 
 if __name__ == '__main__':
     unittest.main()
