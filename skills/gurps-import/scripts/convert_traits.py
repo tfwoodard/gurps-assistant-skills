@@ -50,8 +50,16 @@ entry: `into` names it, and `under` a heading in it to put the table straight af
 at the entry's end); `title_lines` says how many of its first lines are its title, and `fold` that it
 is set as that many like tables side by side, to be read one after another.
 
+`lead_lines` says how many lines after the title are text before the table ("This table
+summarizes ..."): they go into the entry as a paragraph before it.
+
 `sections` names only the sections that are trait lists (matched by heading and page; a heading
-set over two or more lines is given joined). A list's `traits` can also say:
+set over two or more lines is given joined). A list's `traits.category` may be `"by-cost"` for a
+section of advantages and disadvantages together: a cost printed with a minus makes a
+disadvantage, any other an advantage, and `categories` ({name: category}) names exceptions.
+A plan `entries` key may carry a page ("rules/example-contd@18") to reach one of several entries
+of one name in the chapter (a running example's parts, each titled the same). A list's `traits`
+can also say:
 
   * `"line": "skill"` when the line under a name is an attribute and a difficulty ("IQ/Hard"), and
     `"technique"` when it is a difficulty alone: read into `attribute` and `difficulty`; `"spell"`
@@ -386,7 +394,14 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None):
                     # own (for disadvantages: the trait takes a self-control number)
                     fields[t['starred']] = cost.endswith('*')
             fields.update(t.get('fields', {}))
-            entry = add(t['category'], name, name_run[0], title, fields, rest, name_run[0].get('heading', level + 1),
+            category = t['category']
+            if category == 'by-cost':
+                # A section of advantages and disadvantages together: a cost printed with a minus
+                # is a disadvantage's; the plan's `categories` names any other exception.
+                category = t.get('categories', {}).get(name) or \
+                    ('disadvantages' if re.match(r'^\s*[-−–]', cost or '') else 'advantages')
+                fields['kind'] = {'advantages': 'advantage', 'disadvantages': 'disadvantage'}.get(category, fields['kind'])
+            entry = add(category, name, name_run[0], title, fields, rest, name_run[0].get('heading', level + 1),
                         t.get('name_size', name_size), again)
             # labelled paragraphs the list gives each trait ("Defaults: IQ-5 or ..."): fields too,
             # as printed; they stay in the text where they are. Only the trait's own, which the
@@ -478,6 +493,9 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None):
                 continue
             # its title, when it has one: the plan says how many of its first lines are that
             title_lines, bl = bl[:bp.get('title_lines', 0)], bl[bp.get('title_lines', 0):]
+            # and the lines of text between its title and its header ("This table summarizes ..."),
+            # which go before the table as a paragraph
+            lead, bl = bl[:bp.get('lead_lines', 0)], bl[bp.get('lead_lines', 0):]
             k = next((i for i, l in enumerate(bl) if not is_table_header(l)), len(bl))
             if k == 0 or len(bl) - k < 2:
                 report['errors'].append(f'box {bid} (p{region["page"]}): no header line and two rows to read as a table')
@@ -493,6 +511,9 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None):
                     report['errors'].append(f'box {bid}: {target} has no heading {bp["under"]!r} to put the table under')
                     continue
                 at = heads[0] + 1
+            for b in blocks_from_lines(lead, report, target, vocab):
+                blocks.insert(at, b)
+                at += 1
             blocks.insert(at, block)
             block['read_with'] = [side for side, j in (('before', at - 1), ('after', at + 1))
                                   if 0 <= j < len(blocks) and blocks[j]['type'] == 'paragraph']
@@ -502,12 +523,22 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None):
             report['errors'].append(f'box {bid} (p{region["page"]}) has no title: give it a name in the plan\'s boxes')
             continue
         title_run = bruns[0][1] if bruns[0][0] == 'heading' else []
-        name = bp.get('name') or fix_case(heading_text(title_run))
-        content = [l for _, run in bruns[1 if title_run else 0:] for l in run]
-        extra = {'relations': [{'role': 'adds-to', 'to': bp['adds_to']}]} if bp.get('adds_to') else {}
-        fields = dict(plan.get('rules_fields', {}), box=True)
-        add('rules', name, bl[0], bp.get('section', name), fields, content, (title_run or bl)[0].get('heading', 2),
-            (title_run or bl)[0]['size'], extra)
+        # Two sidebars can share a frame: a later heading as large as the box's title starts
+        # another entry, named by that heading.
+        parts = [[]]
+        for k, (kind, run) in enumerate(bruns):
+            if k and title_run and kind == 'heading' and run[0]['size'] >= title_run[0]['size'] - 0.3:
+                parts.append([])
+            parts[-1].append((kind, run))
+        for n, part in enumerate(parts):
+            head = part[0][1] if part[0][0] == 'heading' and (n or title_run) else []
+            name = (bp.get('name') if n == 0 else None) or fix_case(heading_text(head))
+            content = [l for _, run in part[1 if head else 0:] for l in run]
+            extra = {'relations': [{'role': 'adds-to', 'to': bp['adds_to']}]} if bp.get('adds_to') and n == 0 else {}
+            fields = dict(plan.get('rules_fields', {}), box=True)
+            first = (head or part[0][1])[0]
+            add('rules', name, first, bp.get('section', name) if n == 0 else name, fields, content,
+                first.get('heading', 2), first['size'], extra)
     for bid in box_plans:
         if bid not in {r['id'] for r in layout.get('regions', [])}:
             report['errors'].append(f'plan box {bid} is not a box in the layout')
@@ -546,8 +577,24 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None):
     seen = {}
     kinds = {}
     out = []
+    used_plans = set()
     for category, e in entries:
         ref = f'{category}/{e["slug"]}'
+        # An entry of the plan's for one of several of a name in this chapter (a running example's
+        # parts, each "(cont'd)"): keyed by its page as well, "rules/x@18", and given its slug first.
+        paged = f'{ref}@{e["page"]}'
+        if paged in plan.get('entries', {}):
+            used_plans.add(paged)
+            ep = plan['entries'][paged]
+            if ep.get('slug'):
+                e['slug'] = ep['slug']
+                ref = f'{category}/{e["slug"]}'
+            e['fields'].update(ep.get('fields', {}))
+            e['relations'] = e.get('relations', []) + ep.get('relations', [])
+            if not e['relations']:
+                del e['relations']
+            if ep.get('audience'):
+                e['audience'] = ep['audience']
         if ref in seen and e['fields'].get('kind') and kinds[ref] and e['fields']['kind'] != kinds[ref]:
             # The book gives two different traits one name and tells them apart by their kind (an
             # enhancement and a limitation both called Armor Divisor), as the data files do: both
@@ -564,7 +611,7 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None):
             continue
         seen[ref] = e['page']
         kinds[ref] = e['fields'].get('kind')
-        ep = plan.get('entries', {}).get(ref, {})
+        ep = {} if paged in used_plans else plan.get('entries', {}).get(ref, {})
         if ep.get('slug'):
             e['slug'] = ep['slug']           # the plan gives it a file name of its own
         e['fields'].update(ep.get('fields', {}))
@@ -589,7 +636,7 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None):
             report['errors'].append(f'{ref} (p{e["page"]}): no text')
         out.append((category, e))
     for ref in plan.get('entries', {}):
-        if ref not in seen:
+        if ref not in seen and ref not in used_plans:
             report['errors'].append(f'plan entry {ref} matches no entry of the chapter')
     for category, _ in out:
         report['counts'][category] = report['counts'].get(category, 0) + 1

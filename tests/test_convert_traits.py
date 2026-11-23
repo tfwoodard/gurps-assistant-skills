@@ -603,6 +603,113 @@ class ParagraphTest(unittest.TestCase):
         self.assertEqual([m for _, m in self.marks(build)], [True, False, False, True])
 
 
+class TwoSidebarsInOneFrameTest(unittest.TestCase):
+    def test_a_heading_as_large_as_the_boxs_title_starts_another_entry(self):
+        def l(text, baseline, size=9.5, heading=None):
+            d = {'page': 10, 'column': 'full', 'box': '10.1', 'text': text, 'size': size, 'baseline': baseline,
+                 'top': baseline - size, 'x0': 60.0, 'x1': 300.0, 'bold': bool(heading), 'italic': False, 'font': 'T',
+                 'furniture': False, 'words': [[w, 60.0, 70.0] for w in text.split()],
+                 'spans': [{'text': text, 'size': size, 'bold': bool(heading), 'italic': False}]}
+            if heading:
+                d['heading'] = heading
+            return d
+        doc = {'pages': [10], 'body_size': 9.5, 'gutters': {}, 'lines': [
+            l('Gulls', 100.0, 14.0, 3), l('Gulls steal the keepers’ bread.', 116.0),
+            l('Nesting', 130.0, 11.0, 4), l('They nest on the gallery rail.', 144.0),
+            l('Fog Bells', 160.0, 14.0, 3), l('Ring the bell every minute in fog.', 176.0)],
+            'regions': [{'id': '10.1', 'kind': 'box', 'page': 10, 'bbox': [50, 80, 320, 190]}]}
+        plan = {'source': 'ML', 'chapter': 'ch3', 'name_size': 20.0, 'cost_size': 11.0, 'icons': [], 'indent': False}
+        entries, report = convert_traits.convert_chapter(doc, plan)
+        self.assertEqual(report['errors'], [])
+        boxes = {e['slug']: e for c, e in entries if e['fields'].get('box')}
+        self.assertEqual(sorted(boxes), ['fog-bells', 'gulls'])
+        self.assertEqual([b.get('text') for b in boxes['gulls']['content']],
+                         ['Gulls steal the keepers’ bread.', 'Nesting', 'They nest on the gallery rail.'])
+        self.assertEqual([b.get('text') for b in boxes['fog-bells']['content']], ['Ring the bell every minute in fog.'])
+
+
+def mini_line(text, baseline, size=9.5, heading=None, page=10, box=None):
+    d = {'page': page, 'column': 'left', 'text': text, 'size': size, 'baseline': baseline, 'top': baseline - size,
+         'x0': 60.0, 'x1': 200.0, 'bold': bool(heading), 'italic': False, 'font': 'T', 'furniture': False,
+         'words': [[w, 60.0, 70.0] for w in text.split()],
+         'spans': [{'text': text, 'size': size, 'bold': bool(heading), 'italic': False}]}
+    if heading:
+        d['heading'] = heading
+    if box:
+        d['box'] = box
+    return d
+
+
+class MixedListTest(unittest.TestCase):
+    def doc(self):
+        return {'pages': [10], 'body_size': 9.5, 'gutters': {}, 'regions': [], 'lines': [
+            mini_line('LAMP FEATURES', 60.0, 20.0, 2),
+            mini_line('Keepers differ in what they bring to the tower.', 80.0),
+            mini_line('Lamp Sense', 100.0, 14.0, 3), mini_line('5 points', 114.0, 11.0, 4),
+            mini_line('You know when a lamp is about to fail.', 128.0),
+            mini_line('Fog Blindness', 150.0, 14.0, 3), mini_line('-10 points', 164.0, 11.0, 4),
+            mini_line('You cannot see a lamp through fog.', 178.0),
+            mini_line('Tower Height', 200.0, 14.0, 3), mini_line('0 points', 214.0, 11.0, 4),
+            mini_line('Your tower is unusually tall.', 228.0)]}
+
+    def test_a_list_of_both_sorts_takes_each_traits_category_from_its_cost(self):
+        plan = {'source': 'ML', 'chapter': 'ch1', 'name_size': 14.0, 'cost_size': 11.0, 'icons': [], 'indent': False,
+                'sections': [{'heading': 'Lamp Features', 'page': 10,
+                              'traits': {'category': 'by-cost', 'kind': 'trait',
+                                         'categories': {'Tower Height': 'disadvantages'}}}]}
+        entries, report = convert_traits.convert_chapter(self.doc(), plan)
+        self.assertEqual(report['errors'], [])
+        got = {e['slug']: (c, e['fields']['kind']) for c, e in entries if c != 'rules'}
+        self.assertEqual(got, {'lamp-sense': ('advantages', 'advantage'), 'fog-blindness': ('disadvantages', 'disadvantage'),
+                               'tower-height': ('disadvantages', 'disadvantage')})
+
+    def test_a_panels_lines_between_its_title_and_header_go_before_its_table(self):
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from test_text_tables import line as text_line
+        doc = self.doc()
+        box = [mini_line('Lamp Table', 300.0, 14.0, box='10.1'), text_line(316.0, [(60, 'Lamps the keepers use.')]),
+               text_line(330.0, [(60, 'Lamp'), (150, 'Oil')], True),
+               text_line(341.0, [(60, 'Small'), (150, '1 pint')]), text_line(352.0, [(60, 'Great'), (150, '4 pints')])]
+        for l in box[1:]:
+            l.update(box='10.1', column='full')
+        doc['lines'] += box
+        doc['regions'] = [{'id': '10.1', 'kind': 'box', 'page': 10, 'bands': True, 'bbox': [50, 285, 300, 360]}]
+        plan = {'source': 'ML', 'chapter': 'ch1', 'name_size': 14.0, 'cost_size': 11.0, 'icons': [], 'indent': False,
+                'sections': [{'heading': 'Lamp Features', 'page': 10, 'traits': {'category': 'by-cost', 'kind': 'trait'}}],
+                'boxes': {'10.1': {'into': 'rules/lamp-features', 'title_lines': 1, 'lead_lines': 1}}}
+        entries, report = convert_traits.convert_chapter(doc, plan)
+        self.assertEqual(report['errors'], [])
+        owner = next(e for c, e in entries if e['slug'] == 'lamp-features')
+        self.assertEqual([(b['type'], b.get('text') or b.get('title')) for b in owner['content']][-2:],
+                         [('paragraph', 'Lamps the keepers use.'), ('table', 'Lamp Table')])
+
+    def test_entries_of_one_name_are_told_apart_by_page_in_the_plan(self):
+        doc = {'pages': [10, 11], 'body_size': 9.5, 'gutters': {}, 'lines': [
+            mini_line('Lamp Log', 60.0, 14.0, 3, box='10.1'), mini_line('Day one: lit at dusk.', 76.0, box='10.1'),
+            mini_line('Lamp Log (cont’d)', 60.0, 14.0, 3, page=11, box='11.1'),
+            mini_line('Day two: fog.', 76.0, page=11, box='11.1'),
+            mini_line('Lamp Log (cont’d)', 300.0, 14.0, 3, page=11, box='11.2'),
+            mini_line('Day three: storm.', 316.0, page=11, box='11.2')],
+            'regions': [{'id': '10.1', 'kind': 'box', 'page': 10, 'bbox': [50, 40, 300, 90]},
+                        {'id': '11.1', 'kind': 'box', 'page': 11, 'bbox': [50, 40, 300, 90]},
+                        {'id': '11.2', 'kind': 'box', 'page': 11, 'bbox': [50, 280, 300, 330]}]}
+        plan = {'source': 'ML', 'chapter': 'ch1', 'name_size': 20.0, 'cost_size': 11.0, 'icons': [], 'indent': False,
+                'entries': {'rules/lamp-log-contd@11': {'slug': 'lamp-log-contd-2', 'relations': [{'role': 'adds-to', 'to': 'rules/lamp-log'}]}}}
+        entries, report = convert_traits.convert_chapter(doc, plan)
+        self.assertTrue(any('two entries of this chapter take this slug' in e for e in report['errors']))
+        # the page alone does not tell two on one page apart: the second takes its own key
+        doc['lines'][4]['page'] = doc['lines'][5]['page'] = 12
+        doc['regions'][2].update(id='12.1', page=12)
+        for l in doc['lines'][4:]:
+            l['box'] = '12.1'
+        plan['entries']['rules/lamp-log-contd@12'] = {'slug': 'lamp-log-contd-3', 'relations': [{'role': 'adds-to', 'to': 'rules/lamp-log'}]}
+        entries, report = convert_traits.convert_chapter(doc, plan)
+        self.assertEqual(report['errors'], [])
+        got = {e['slug']: e.get('relations') for c, e in entries}
+        self.assertEqual(got, {'lamp-log': None, 'lamp-log-contd-2': [{'role': 'adds-to', 'to': 'rules/lamp-log'}],
+                               'lamp-log-contd-3': [{'role': 'adds-to', 'to': 'rules/lamp-log'}]})
+
+
 class HeadingLinesTest(unittest.TestCase):
     def head(self, text, size, baseline):
         return {'page': 10, 'column': 'right', 'text': text, 'size': size, 'baseline': baseline, 'heading': 2,

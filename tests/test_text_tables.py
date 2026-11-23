@@ -166,6 +166,39 @@ class TextTableTest(unittest.TestCase):
         self.assertEqual(block['columns'], ['Rank', 'Examples', 'Upkeep'])
         self.assertNotIn('banners', block)
 
+    def test_figures_lined_up_on_their_decimal_point_line_up(self):
+        def at_point(x, text):                  # a figure whose whole number ends at x
+            whole = text.split('.')[0]
+            return (x - 0.5 * SIZE * len(whole), text)
+        t = table([[(60, '1'), at_point(150, '0.2')], [(60, '2'), at_point(150, '0.8')],
+                   [(60, '5'), at_point(150, '5')], [(60, '9'), at_point(150, '16')], [(60, '10'), at_point(150, '20')]],
+                  [(60, 'Reach'), (130, 'Oil')])
+        out, report = self.read(t)
+        self.assertEqual(report['errors'], [])
+        self.assertEqual([r[1] for r in out[0]['block']['rows']], ['0.2', '0.8', '5', '16', '20'])
+
+    def test_names_centred_on_their_columns_under_a_banner_centred_on_them(self):
+        lines = [line(189.0, [(60, 'Hour'), (116.25, 'Oil Burned (pints)')], True),
+                 line(200.0, [(98, 'Calm (0)'), (140, 'Wind (1)'), (182, 'Gale (2)')], True),
+                 line(211.0, [(60, '1'), (110, '1'), (152, '2'), (194, '4')]),
+                 line(222.0, [(60, '2'), (110, '2'), (152, '4'), (194, '8')])]
+        out, report = self.read(lines)
+        self.assertEqual(report['errors'], [])
+        block = out[0]['block']
+        self.assertEqual(block['columns'], ['Hour', 'Calm (0)', 'Wind (1)', 'Gale (2)'])
+        self.assertEqual(block['banners'], [{'text': 'Oil Burned (pints)', 'columns': [2, 4]}])
+
+    def test_a_banner_over_one_columns_cells_is_a_banner_when_it_overhangs_its_name_below(self):
+        lines = [line(189.0, [(60, 'Rank'), (116.5, 'Weight by Build')], True),
+                 line(200.0, [(100, 'Thin'), (139, 'Plump'), (190, 'Fat')], True),
+                 line(211.0, [(60, '1'), (100, '40'), (145, '60'), (190, '80')]),
+                 line(222.0, [(60, '2'), (100, '50'), (145, '75'), (190, '100')])]
+        out, report = self.read(lines)
+        self.assertEqual(report['errors'], [])
+        block = out[0]['block']
+        self.assertEqual(block['columns'], ['Rank', 'Thin', 'Plump', 'Fat'])
+        self.assertEqual(block['banners'], [{'text': 'Weight by Build', 'columns': [2, 4]}])
+
     def test_a_banner_runs_on_over_unnamed_columns_which_take_their_names_from_it(self):
         lines = [line(200.0, [(60, 'Level'), (110, 'Aging [Frequency of Rolls]')], True),
                  line(211.0, [(60, '0'), (110, '50 years'), (200, '70 years'), (290, '90 years')]),
@@ -184,6 +217,14 @@ class TextTableTest(unittest.TestCase):
                       {'text': '2', 'size': SIZE, 'bold': True, 'italic': True}]
         self.assertTrue(entry_text.is_table_header(l))
         self.assertFalse(entry_text.is_table_header(line(200.0, [(60, 'Fog 2')])))
+
+    def test_a_header_set_larger_than_its_rows_is_a_header_though_marked_a_heading(self):
+        h = line(200.0, [(60, 'Lamp'), (150, 'Cost'), (200, 'Page')], True)
+        h['heading'] = 5
+        self.assertTrue(entry_text.is_table_header(h))
+        title = line(200.0, [(60, 'Lamps and Lanterns')], True)
+        title['heading'] = 5
+        self.assertFalse(entry_text.is_table_header(title))
 
     def test_a_table_set_as_two_side_by_side_is_read_one_after_the_other(self):
         header = [line(200.0, [(60, 'Skill'), (110, 'Chance'), (200, 'Skill'), (250, 'Chance')], True)]

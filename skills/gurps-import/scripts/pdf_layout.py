@@ -91,6 +91,7 @@ from pdfminer.pdffont import PDFSimpleFont
 # their small capitals at those codes too, and entry_text.fix_case() restores those words.
 CASE_FIXED = collections.Counter()
 NOT_BOXES = set()                        # ids of frames that are no panels (--not-boxes)
+SET_GUTTERS = {}                         # printed page -> its gutters, as the plan gives them (--set-gutters)
 REPLACE_CHARS = {}                       # characters a book's fonts give wrongly -> what the page prints (--replace-chars)
 CHARS_REPLACED = collections.Counter()
 _to_unichr = PDFSimpleFont.to_unichr
@@ -1076,7 +1077,11 @@ def page_lines(page, page_no, icon_fonts=(), marks=None, shapes=None, regions=No
     gutters = gutters_under_a_standfirst([w for w in body if id(w) not in hidden and w['top'] >= page.height * MARGIN_TOP and
                                           w['bottom'] <= page.height * (1 - MARGIN_BOTTOM) and
                                           max(c['size'] for c in w['chars']) <= usual_size], page.width)
-    if usual and len(gutters) < len(usual):
+    if page_no in SET_GUTTERS:
+        # A page of tables side by side, whose columns' blanks look like gutters: the plan says
+        # where its columns are.
+        gutters = list(SET_GUTTERS[page_no])
+    elif usual and len(gutters) < len(usual):
         # The book's usual gutters, where this page's own body words leave each one clear (a
         # crossing line or so allowed, as when a gutter is found) and stand on both sides of one.
         sized = [w for w in body if id(w) not in hidden and w['top'] >= page.height * MARGIN_TOP and
@@ -1203,11 +1208,28 @@ def assign_headings(lines):
     return sizes, body
 
 
+def set_gutters(specs):
+    """--set-gutters values -> {printed page: [gutter x...]}: "297-304=305", "300=296,420",
+    "305=none" (no gutters: the page is read whole)."""
+    out = {}
+    for s in specs:
+        pages, _, xs = s.partition('=')
+        if not xs:
+            sys.exit(f'--set-gutters {s}: write PAGES=X,X (or PAGES=none)')
+        first, _, last = pages.partition('-')
+        gutters = [] if xs == 'none' else [float(x) for x in xs.split(',')]
+        for p in range(int(first), int(last or first) + 1):
+            out[p] = gutters
+    return out
+
+
 def read(pdf_path, first, last, offset, icon_fonts=(), boxes=False, icon_text=None, margin_lines=(),
-         aside_fonts=(), icons_alone=False, replace_chars=None, not_boxes=(), usual_gutters=None):
+         aside_fonts=(), icons_alone=False, replace_chars=None, not_boxes=(), usual_gutters=None, set_gutters=None):
     CASE_FIXED.clear()
     NOT_BOXES.clear()
     NOT_BOXES.update(not_boxes)
+    SET_GUTTERS.clear()
+    SET_GUTTERS.update(set_gutters or {})
     REPLACE_CHARS.clear()
     REPLACE_CHARS.update(replace_chars or {})
     CHARS_REPLACED.clear()
@@ -1247,7 +1269,7 @@ def read(pdf_path, first, last, offset, icon_fonts=(), boxes=False, icon_text=No
                 if with_most:
                     usual_of[side] = [sorted(g[i] for g in with_most)[len(with_most) // 2] for i in range(most)]
             for p, r in pages.items():
-                if len(r['gutters']) < most and p % 2 in usual_of:
+                if len(r['gutters']) < most and p % 2 in usual_of and p not in SET_GUTTERS:
                     again = one(p, usual_of[p % 2])
                     if again['usual']:
                         gutter_notes.append({'page': p, 'found': [round(g, 1) for g in r['gutters']],
@@ -1315,6 +1337,9 @@ def main(argv=None):
                     help='the book\'s usual gutters, for a chapter too short to show them on most of its pages: '
                          'even=214.5,379.5 odd=232.5,397.5 (a page showing fewer is read again with them, '
                          'where its words leave them clear)')
+    ap.add_argument('--set-gutters', nargs='*', default=[], metavar='PAGES=X,X',
+                    help='the gutters of pages whose own blanks mislead (tables side by side, their columns\' '
+                         'blanks looking like gutters), by printed page or range: 297-304=305 or 305=none')
     ap.add_argument('--icons-alone', action='store_true',
                     help='with --icon-text: an icon glyph with no text beside it makes a line of its own '
                          '(icons turned over to the line under a heading); otherwise it is left out of the text')
@@ -1338,7 +1363,8 @@ def main(argv=None):
     doc = read(a.pdf, first, last, a.page_offset, a.icon_fonts, a.boxes, icon_text, a.margin_lines, aside_fonts,
                a.icons_alone, dict(x.split('=', 1) for x in a.replace_chars), a.not_boxes,
                {('even', 'odd').index(k): [float(v) for v in x.split(',')]
-                for k, x in (u.split('=', 1) for u in a.usual_gutters)})
+                for k, x in (u.split('=', 1) for u in a.usual_gutters)},
+               set_gutters(a.set_gutters))
     if doc['pages_without_text']:
         print('no text layer on printed pages ' + ', '.join(map(str, doc['pages_without_text'])) +
               ': look at the page images, and ask before running OCR', file=sys.stderr)

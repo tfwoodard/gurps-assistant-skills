@@ -59,6 +59,15 @@ class UsualGuttersTest(unittest.TestCase):
         cols = [c for c, t in texts if not t.startswith('The keepers')]
         self.assertEqual(cols, ['left'] * 20 + ['middle'] * 20 + ['right'] * 20)
 
+    def test_gutters_the_plan_sets_are_the_pages_own(self):
+        doc = self.layout('--set-gutters', '1=210')
+        self.assertEqual(doc['gutters']['1'], [210.0])
+        texts = [(l['column'], l['text']) for l in doc['lines']]
+        self.assertIn(('left', 'Left column words here.'), texts)
+        self.assertTrue(any(c == 'right' and t.startswith('Middle column words.') for c, t in texts))
+        doc = self.layout('--set-gutters', '1=none')
+        self.assertIsNone(doc['gutters']['1'])
+
     def test_without_them_the_columns_run_together(self):
         doc = self.layout()
         self.assertFalse(doc['gutter_notes'])
