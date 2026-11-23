@@ -624,10 +624,52 @@ def whole_end(w):
     return w[1] + (w[2] - w[1]) * len(m.group(1)) / len(w[0])
 
 
+FLUSH_GAP = 2.0          # x the type size: the least gap before a cell of a flush-right last column
+
+
+def flush_right_tails(headers, rows, size, right):
+    """A table whose last column is set flush right, read line by line: {row index: index of the
+    first word of its last-column cell}, or None when the lines don't read so.
+
+    It reads so when the header's last line ends at the rows' right edge after a wide gap, and so
+    do at least two rows and half of them: each such row's cell is the words after its last gap
+    of FLUSH_GAP x the type size or more ("Bake a loaf ... 1 hr." over "Darn a sock 10 min."). A
+    line ending at the right edge with no such gap, starting where cells of that column start or
+    further right, is all that column's (its cell carried on to a line of its own). One ending at
+    the right edge any further left is prose, and the lines are no such table. A line that stops
+    short of the edge is left to the row checks: the first line of a name set over two lines, or
+    a row missing its cell."""
+    tol = ALIGN_TOLERANCE
+
+    def last_gap(ws):
+        ks = [k for k in range(1, len(ws)) if ws[k][1] - ws[k - 1][2] >= FLUSH_GAP * size]
+        return ks[-1] if ks else None
+
+    head = headers[-1]['words']
+    if last_gap(head) is None or abs(head[-1][2] - right) > tol:
+        return None
+    tails = {}
+    for i, l in enumerate(rows):
+        k = last_gap(l['words'])
+        if k is not None and abs(l['words'][-1][2] - right) <= tol:
+            tails[i] = k
+    if len(tails) < 2 or 2 * len(tails) < len(rows):
+        return None
+    start = min(rows[i]['words'][k][1] for i, k in tails.items())
+    for i, l in enumerate(rows):
+        if i in tails or abs(l['words'][-1][2] - right) > tol:
+            continue
+        if l['words'][0][1] < start - tol:
+            return None
+        tails[i] = 0
+    return tails
+
+
 def read_text_table(header, rows):
     """Header line(s) and the row lines under them -> (columns, rows of cells, banners, failures).
 
-    The columns are the blanks that every row leaves clear: no row has a word there. A header can
+    The columns are the blanks that every row leaves clear: no row has a word there. When none is,
+    the last column may be set flush right, its cells read line by line (flush_right_tails). A header can
     be set over several lines. Each of its phrases (words a word space apart) names the column it
     stands over, the lines read downwards ("Self-Control" over "Number"). A phrase that reaches
     across the blank between two columns is a banner over the columns it spans, and over any
@@ -646,36 +688,58 @@ def read_text_table(header, rows):
     failures = []
     left = min(l['x0'] for l in rows)
     right = max(l['x1'] for l in rows)
-    step = 0.5
-    n = int((right - left) / step) + 1
-    covered = [False] * n
-    for l in rows:
-        for _, x0, x1 in l['words']:
-            for k in range(max(0, int((x0 - left) / step)), min(n, int((x1 - left) / step) + 1)):
+
+    def blanks(tails):
+        """The blanks wide enough to part columns, left clear by every row's words (those before
+        its flush-right tail, if it has one)."""
+        step = 0.5
+        kept = [w for i, l in enumerate(rows) for w in l['words'][:tails.get(i, len(l['words']))]]
+        if not kept:
+            return []
+        lo, hi = min(w[1] for w in kept), max(w[2] for w in kept)
+        n = int((hi - lo) / step) + 1
+        covered = [False] * n
+        for _, x0, x1 in kept:
+            for k in range(max(0, int((x0 - lo) / step)), min(n, int((x1 - lo) / step) + 1)):
                 covered[k] = True
-    seps, start = [], None
-    for k, c in enumerate(covered + [True]):
-        if not c and start is None:
-            start = k
-        elif c and start is not None:
-            if (k - start) * step >= COLUMN_GAP * size:
-                seps.append(left + (start + k) / 2 * step)
-            start = None
+        found, start = [], None
+        for k, c in enumerate(covered + [True]):
+            if not c and start is None:
+                start = k
+            elif c and start is not None:
+                if (k - start) * step >= COLUMN_GAP * size:
+                    found.append(lo + (start + k) / 2 * step)
+                start = None
+        return found
+
+    tails = {}
+    seps = blanks(tails)
     if not seps:
-        return [], [], [], ['its rows leave no blank column between them: it reads as one column']
-    ncols = len(seps) + 1
+        # No blank runs down the table: perhaps its last column is set flush right, and a long
+        # cell before it reaches past where a short one of its own begins.
+        tails = flush_right_tails(headers, rows, size, right)
+        if tails is None:
+            return [], [], [], ['its rows leave no blank column between them: it reads as one column']
+        seps = blanks(tails)
+    ncols = len(seps) + 1 + bool(tails)
     edges = [float('-inf')] + seps + [float('inf')]
+    tail_from = min((rows[i]['words'][k][1] for i, k in tails.items()), default=float('inf'))
 
     def column_of(x):
-        return next(i for i in range(ncols) if edges[i] <= x < edges[i + 1])
+        if tails and x >= tail_from - ALIGN_TOLERANCE:
+            return ncols - 1
+        return next(i for i in range(len(seps) + 1) if edges[i] <= x < edges[i + 1])
 
-    def cells(l):
+    def cells(i, l):
         out = [[] for _ in range(ncols)]
-        for w in l['words']:
-            out[column_of((w[1] + w[2]) / 2)].append(w)
+        for k, w in enumerate(l['words']):
+            if i in tails and k >= tails[i]:
+                out[-1].append(w)
+            else:
+                out[next(c for c in range(len(seps) + 1) if edges[c] <= (w[1] + w[2]) / 2 < edges[c + 1])].append(w)
         return out
 
-    grid = [cells(l) for l in rows]
+    grid = [cells(i, l) for i, l in enumerate(rows)]
     extent = []                       # each column's cells, from their leftmost edge to their rightmost
     for c in range(ncols):
         ws = [w for r in grid for w in r[c]]
