@@ -493,7 +493,7 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None):
                 continue
             # its title, when it has one: the plan says how many of its first lines are that
             title_lines, bl = bl[:bp.get('title_lines', 0)], bl[bp.get('title_lines', 0):]
-            # and the lines of text between its title and its header ("This table summarizes ..."),
+            # and the lines of text between its title and its header ("This table lists the lamps ..."),
             # which go before the table as a paragraph
             lead, bl = bl[:bp.get('lead_lines', 0)], bl[bp.get('lead_lines', 0):]
             k = next((i for i, l in enumerate(bl) if not is_table_header(l)), len(bl))
