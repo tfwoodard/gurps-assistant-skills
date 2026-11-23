@@ -603,6 +603,31 @@ class ParagraphTest(unittest.TestCase):
         self.assertEqual([m for _, m in self.marks(build)], [True, False, False, True])
 
 
+class TwoSidebarsInOneFrameTest(unittest.TestCase):
+    def test_a_heading_as_large_as_the_boxs_title_starts_another_entry(self):
+        def l(text, baseline, size=9.5, heading=None):
+            d = {'page': 10, 'column': 'full', 'box': '10.1', 'text': text, 'size': size, 'baseline': baseline,
+                 'top': baseline - size, 'x0': 60.0, 'x1': 300.0, 'bold': bool(heading), 'italic': False, 'font': 'T',
+                 'furniture': False, 'words': [[w, 60.0, 70.0] for w in text.split()],
+                 'spans': [{'text': text, 'size': size, 'bold': bool(heading), 'italic': False}]}
+            if heading:
+                d['heading'] = heading
+            return d
+        doc = {'pages': [10], 'body_size': 9.5, 'gutters': {}, 'lines': [
+            l('Gulls', 100.0, 14.0, 3), l('Gulls steal the keepers’ bread.', 116.0),
+            l('Nesting', 130.0, 11.0, 4), l('They nest on the gallery rail.', 144.0),
+            l('Fog Bells', 160.0, 14.0, 3), l('Ring the bell every minute in fog.', 176.0)],
+            'regions': [{'id': '10.1', 'kind': 'box', 'page': 10, 'bbox': [50, 80, 320, 190]}]}
+        plan = {'source': 'ML', 'chapter': 'ch3', 'name_size': 20.0, 'cost_size': 11.0, 'icons': [], 'indent': False}
+        entries, report = convert_traits.convert_chapter(doc, plan)
+        self.assertEqual(report['errors'], [])
+        boxes = {e['slug']: e for c, e in entries if e['fields'].get('box')}
+        self.assertEqual(sorted(boxes), ['fog-bells', 'gulls'])
+        self.assertEqual([b.get('text') for b in boxes['gulls']['content']],
+                         ['Gulls steal the keepers’ bread.', 'Nesting', 'They nest on the gallery rail.'])
+        self.assertEqual([b.get('text') for b in boxes['fog-bells']['content']], ['Ring the bell every minute in fog.'])
+
+
 class HeadingLinesTest(unittest.TestCase):
     def head(self, text, size, baseline):
         return {'page': 10, 'column': 'right', 'text': text, 'size': size, 'baseline': baseline, 'heading': 2,

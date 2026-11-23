@@ -246,6 +246,14 @@ class PdfToolsTest(unittest.TestCase):
         self.assertEqual(r.returncode, 0)
         self.assertIn("excused: 'fog' x1 (--ignore)", r.stdout)
 
+    def test_a_word_joined_across_a_line_end_with_a_figure_after_it_counts_the_same(self):
+        sys.path.insert(0, SCRIPTS)
+        import check_coverage
+        printed = check_coverage.words('drops to wick-') + check_coverage.words('length+2, then')
+        joined = check_coverage.words('drops to wicklength+2, then')
+        credited = check_coverage.words('wick-length')                 # the report's `dehyphenated` record
+        self.assertEqual(sorted(printed), sorted([w for w in joined if w != 'wicklength'] + credited))
+
 
 if __name__ == '__main__':
     unittest.main()

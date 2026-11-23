@@ -502,12 +502,22 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None):
             report['errors'].append(f'box {bid} (p{region["page"]}) has no title: give it a name in the plan\'s boxes')
             continue
         title_run = bruns[0][1] if bruns[0][0] == 'heading' else []
-        name = bp.get('name') or fix_case(heading_text(title_run))
-        content = [l for _, run in bruns[1 if title_run else 0:] for l in run]
-        extra = {'relations': [{'role': 'adds-to', 'to': bp['adds_to']}]} if bp.get('adds_to') else {}
-        fields = dict(plan.get('rules_fields', {}), box=True)
-        add('rules', name, bl[0], bp.get('section', name), fields, content, (title_run or bl)[0].get('heading', 2),
-            (title_run or bl)[0]['size'], extra)
+        # Two sidebars can share a frame: a later heading as large as the box's title starts
+        # another entry, named by that heading.
+        parts = [[]]
+        for k, (kind, run) in enumerate(bruns):
+            if k and title_run and kind == 'heading' and run[0]['size'] >= title_run[0]['size'] - 0.3:
+                parts.append([])
+            parts[-1].append((kind, run))
+        for n, part in enumerate(parts):
+            head = part[0][1] if part[0][0] == 'heading' and (n or title_run) else []
+            name = (bp.get('name') if n == 0 else None) or fix_case(heading_text(head))
+            content = [l for _, run in part[1 if head else 0:] for l in run]
+            extra = {'relations': [{'role': 'adds-to', 'to': bp['adds_to']}]} if bp.get('adds_to') and n == 0 else {}
+            fields = dict(plan.get('rules_fields', {}), box=True)
+            first = (head or part[0][1])[0]
+            add('rules', name, first, bp.get('section', name) if n == 0 else name, fields, content,
+                first.get('heading', 2), first['size'], extra)
     for bid in box_plans:
         if bid not in {r['id'] for r in layout.get('regions', [])}:
             report['errors'].append(f'plan box {bid} is not a box in the layout')
