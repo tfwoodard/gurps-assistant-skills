@@ -611,6 +611,19 @@ def is_table_header(l):
             all(s['bold'] and s['italic'] for s in lettered) and not plain(l['text']).rstrip().endswith(':'))
 
 
+DECIMAL = re.compile(r'^([+−–-]?\$?[\d,]*\d)\.\d+')
+
+
+def whole_end(w):
+    """Where a word's whole number ends, for figures lined up on their decimal point: the word's
+    end, or, when it is a figure with a decimal part ("0.2", "$1.50"), the place of its point,
+    taking every character as one width (figures are set in even widths)."""
+    m = DECIMAL.match(w[0])
+    if not m:
+        return w[2]
+    return w[1] + (w[2] - w[1]) * len(m.group(1)) / len(w[0])
+
+
 def read_text_table(header, rows):
     """Header line(s) and the row lines under them -> (columns, rows of cells, banners, failures).
 
@@ -669,9 +682,11 @@ def read_text_table(header, rows):
         extent.append((min(w[1] for w in ws), max(w[2] for w in ws)) if ws else (edges[c], edges[c]))
 
     # --- the header: phrases, each a column's name or a banner over several ---------------------
-    names = [[] for _ in range(ncols)]
+    names = [[] for _ in range(ncols)]          # per column: (header line, words, x0, x1) of its name
     banners = []
-    for h in headers:
+    single = []                                  # names over one column's cells: (line, name, middle, column)
+    wide = []                                    # phrases over two or more: (line, words, x0, x1, columns, own)
+    for li, h in enumerate(headers):
         phrases = []
         for w in h['words']:
             if phrases and w[1] - phrases[-1][-1][2] <= PHRASE_GAP * size:
@@ -694,37 +709,74 @@ def read_text_table(header, rows):
                     part = ph[starts[k]:starts[k + 1] if k + 1 < len(over) else len(ph)]
                     spans.append((part, part[0][1], part[-1][2], [c]))
                 continue
+            # ...and so are names each centred on its own column ("None (0) Light (1) Medium (2)"
+            # over four columns of figures), on a header's last line (a phrase on a line above
+            # the names is a banner over them): each word goes to the column whose cells' middle
+            # is nearest, and every part must be centred on its column.
+            if len(over) >= 2 and li == len(headers) - 1:
+                mids = {c: (extent[c][0] + extent[c][1]) / 2 for c in over}
+                owner = [min(over, key=lambda c: abs((w[1] + w[2]) / 2 - mids[c])) for w in ph]
+                parts = [(c, [w for w, o in zip(ph, owner) if o == c]) for c in over]
+                if owner == sorted(owner) and all(p for _, p in parts) and \
+                        all(abs((p[0][1] + p[-1][2]) / 2 - mids[c]) <= size for c, p in parts):
+                    spans += [(p, p[0][1], p[-1][2], [c]) for c, p in parts]
+                    continue
             spans.append((ph, x0, x1, over))
         own = set()                    # columns with a phrase of their own on this line
         for ph, x0, x1, over in spans:
             if len(over) < 2:
                 c = over[0] if over else column_of((x0 + x1) / 2)
-                names[c].append(' '.join(w[0] for w in ph))
+                names[c].append((li, ' '.join(w[0] for w in ph), x0, x1))
+                single.append((li, names[c][-1], (x0 + x1) / 2, c))
                 own.add(c)
-        for ph, x0, x1, over in spans:
-            if len(over) < 2:
-                continue
-            text = ' '.join(w[0] for w in ph)
-            # Which columns it is a banner over: a run of columns holding those it stands over,
-            # none of them named beside it on its own line, such that it is centred on the run or
-            # starts where the run starts. (Its ends may fall short of the outer columns' cells,
-            # so overlap alone can miss one.) Of runs that fit equally, the widest.
-            runs = [(a, b) for a in range(over[0] + 1) for b in range(over[-1], ncols)
-                    if not any(c in own for c in range(a, b + 1))]
-            mid = (x0 + x1) / 2
-            centred = [(b - a, -abs(mid - (extent[a][0] + extent[b][1]) / 2), a, b) for a, b in runs
-                       if abs(mid - (extent[a][0] + extent[b][1]) / 2) <= size]
-            started = [(b - a, -abs(x0 - extent[a][0]), a, b) for a, b in runs if abs(x0 - extent[a][0]) <= size]
-            # centred on a run if it is on any (the widest such: cells are narrower than the names
-            # over them, so a banner centred on four columns is centred on the middle two as well);
-            # failing that, starting where a run starts
-            best = max(centred) if centred else max(started) if started else None
-            if best is None:
-                failures.append(f'the banner {text!r} in its header is neither centred over a run of columns nor '
-                                f'starts with one')
-            if best is not None:
-                banners.append({'text': text, 'from': best[2], 'to': best[3]})
-    columns = [' '.join(parts) for parts in names]
+        wide += [(li, ph, x0, x1, over, own) for ph, x0, x1, over in spans if len(over) >= 2]
+
+    def off_centre(mid, a, b, li, names_only=False):
+        # How far `mid` lies from the middle of columns a..b: of their cells, or, when a line
+        # below names each of them, of those names (wide figures can pull the cells' edges out).
+        at = [] if names_only else [(extent[a][0] + extent[b][1]) / 2]
+        if all(any(n[0] > li for n in names[k]) for k in range(a, b + 1)):
+            at.append((min(n[2] for n in names[a] if n[0] > li) + max(n[3] for n in names[b] if n[0] > li)) / 2)
+        return min((abs(mid - x) for x in at), default=float('inf'))
+
+    for li, ph, x0, x1, over, own in wide:
+        text = ' '.join(w[0] for w in ph)
+        # Which columns it is a banner over: a run of columns holding those it stands over,
+        # none of them named beside it on its own line, such that it is centred on the run or
+        # starts where the run starts. (Its ends may fall short of the outer columns' cells,
+        # so overlap alone can miss one.) Of runs that fit equally, the widest.
+        runs = [(a, b) for a in range(over[0] + 1) for b in range(over[-1], ncols)
+                if not any(c in own for c in range(a, b + 1))]
+        mid = (x0 + x1) / 2
+        centred = [(b - a, -off_centre(mid, a, b, li), a, b) for a, b in runs if off_centre(mid, a, b, li) <= size]
+        started = [(b - a, -abs(x0 - extent[a][0]), a, b) for a, b in runs if abs(x0 - extent[a][0]) <= size]
+        # centred on a run if it is on any (the widest such: cells are narrower than the names
+        # over them, so a banner centred on four columns is centred on the middle two as well);
+        # failing that, starting where a run starts
+        best = max(centred) if centred else max(started) if started else None
+        if best is None:
+            failures.append(f'the banner {text!r} in its header is neither centred over a run of columns nor '
+                            f'starts with one')
+        if best is not None:
+            banners.append({'text': text, 'from': best[2], 'to': best[3]})
+    # A phrase over one column's cells, on a line of a header that names each column again on a
+    # line below, is a banner when it is centred on a run of those columns ("Weight Range by
+    # Build" over Skinny ... Very Fat): it only overlaps the middle one. Centred, that is, on
+    # those names: a name over its own column can happen to sit centred on a run's cells.
+    # And it reaches past its own column's names below on both sides, as a name's first line
+    # ("Cost of" over "Living" / "Increase") does not.
+    for li, name, mid, c in single:
+        below = [n for n in names[c] if n[0] > li]
+        if not below or not (name[2] < min(n[2] for n in below) - 1 and name[3] > max(n[3] for n in below) + 1):
+            continue
+        runs = [(b - a, a, b) for a in range(c + 1) for b in range(c, ncols)
+                if b > a and all(any(n[0] > li for n in names[k]) for k in range(a, b + 1)) and
+                off_centre(mid, a, b, li, names_only=True) <= size]
+        if runs:
+            _, a, b = max(runs)
+            names[c].remove(name)
+            banners.append({'text': name[1], 'from': a, 'to': b})
+    columns = [' '.join(n[1] for n in parts) for parts in names]
     for b in banners:                          # a banner runs on over unnamed columns to its right
         while b['to'] + 1 < ncols and not columns[b['to'] + 1] and \
                 not any(o is not b and o['from'] <= b['to'] + 1 <= o['to'] for o in banners):
@@ -763,8 +815,11 @@ def read_text_table(header, rows):
         # the end of its first word (figures set to end together, their units after them: "8
         # seconds" over "15 seconds"). Each way has its line: the place most cells share. A cell
         # must stand on one of those lines, and a line counts only when two or more cells share it.
+        # ...or the end of its first word's whole number (figures lined up on their decimal point:
+        # "0.2" over "13").
         ways = {'left': [w[0][1] for w in col], 'right': [w[-1][2] for w in col],
-                'centre': [(w[0][1] + w[-1][2]) / 2 for w in col], 'figure': [w[0][2] for w in col]}
+                'centre': [(w[0][1] + w[-1][2]) / 2 for w in col], 'figure': [w[0][2] for w in col],
+                'decimal': [whole_end(w[0]) for w in col]}
         lines_ = {}
         for way, xs in ways.items():
             best = max(xs, key=lambda x: sum(1 for y in xs if abs(x - y) <= ALIGN_TOLERANCE))

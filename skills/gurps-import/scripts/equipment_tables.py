@@ -26,7 +26,7 @@ and nothing of it is written.
 import re
 
 from entry_text import (ALIGN_TOLERANCE, COLUMN_GAP, join_lines, marked, plain, slugify,
-                        table_data)
+                        table_data, whole_end)
 
 NOTE = re.compile(r'^\s*\[(\d+)\]\s*')
 CITES = re.compile(r'\[(\d+(?:\s*,\s*\d+)*)\]')
@@ -115,7 +115,8 @@ def aligned(col):
     """The cells of a column that line up with no other: left, right, centre or the end of the
     first word (as entry_text.read_text_table)."""
     ways = {'left': [w[0][1] for w in col], 'right': [w[-1][2] for w in col],
-            'centre': [(w[0][1] + w[-1][2]) / 2 for w in col], 'figure': [w[0][2] for w in col]}
+            'centre': [(w[0][1] + w[-1][2]) / 2 for w in col], 'figure': [w[0][2] for w in col],
+            'decimal': [whole_end(w[0]) for w in col]}
     lines = {}
     for way, xs in ways.items():
         best = max(xs, key=lambda x: sum(1 for y in xs if abs(x - y) <= ALIGN_TOLERANCE))
