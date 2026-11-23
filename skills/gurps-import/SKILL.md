@@ -117,6 +117,9 @@ PDF or anything read from it into the repo.
      most of a column on half its pages, or tables across the page fill the rest):
      give the columns the book shows elsewhere (`--usual-gutters even=X,X odd=X,X`,
      the plan's `usual_gutters`).
+   - pages of tables side by side, whose columns' blanks are taken for gutters: give
+     each page's gutters (`--set-gutters 297=312 298=296 305-306=none`, the plan's
+     `set_gutters`).
    - a table set across the page on stripes of tint (stacked thick strokes): its
      rows, and the notes under it, are read as whole lines (notes set in two columns
      of their own are read in those), and the page's gutters are found from the

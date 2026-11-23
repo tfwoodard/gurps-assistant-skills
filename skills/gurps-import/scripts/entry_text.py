@@ -602,8 +602,12 @@ def is_table_header(l):
     """A line of a text table's header: set wholly in bold italic at the size of the text. Spans
     with no letters in them (a multiplication sign from a symbol font) don't count either way."""
     lettered = [s for s in l.get('spans') or [] if re.search(r'[^\W\d_]', s['text'])]
+    # A header set larger than small type under it (a list in 8-point type, its header in 9) is
+    # marked a heading by its size; its words, set column-wide apart, show it is a header.
+    words = l.get('words') or []
+    spread = any(b[1] - a[2] > 2 * l['size'] for a, b in zip(words, words[1:]))
     # (a line ending in a colon is a label for the text after it, not a header)
-    return (not l.get('heading') and not l.get('block') and bool(lettered) and
+    return ((not l.get('heading') or spread) and not l.get('block') and bool(lettered) and
             all(s['bold'] and s['italic'] for s in lettered) and not plain(l['text']).rstrip().endswith(':'))
 
 

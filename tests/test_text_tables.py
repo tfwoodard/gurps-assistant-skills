@@ -185,6 +185,14 @@ class TextTableTest(unittest.TestCase):
         self.assertTrue(entry_text.is_table_header(l))
         self.assertFalse(entry_text.is_table_header(line(200.0, [(60, 'Fog 2')])))
 
+    def test_a_header_set_larger_than_its_rows_is_a_header_though_marked_a_heading(self):
+        h = line(200.0, [(60, 'Lamp'), (150, 'Cost'), (200, 'Page')], True)
+        h['heading'] = 5
+        self.assertTrue(entry_text.is_table_header(h))
+        title = line(200.0, [(60, 'Lamps and Lanterns')], True)
+        title['heading'] = 5
+        self.assertFalse(entry_text.is_table_header(title))
+
     def test_a_table_set_as_two_side_by_side_is_read_one_after_the_other(self):
         header = [line(200.0, [(60, 'Skill'), (110, 'Chance'), (200, 'Skill'), (250, 'Chance')], True)]
         rows = [line(211.0, [(60, '3'), (110, '1%'), (200, '5'), (250, '5%')]),
