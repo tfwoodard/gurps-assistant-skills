@@ -98,6 +98,24 @@ class WriteChapter(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.lib, 'library-data', 'advantages', 'eel-speech.json')))
         self.assertFalse(os.path.exists(os.path.join(self.lib, 'library-data', 'advantages', 'eel-speech.md')))
 
+    def test_a_slug_another_chapter_holds_stops_the_write_before_any_file_is_touched(self):
+        # Chapter 1 already holds rules/gift-list, which chapter 2 would write too.
+        rules = os.path.join(self.lib, 'library-data', 'rules')
+        os.makedirs(rules)
+        self.dump(os.path.join(rules, '_index.json'), [
+            {'slug': 'gift-list', 'name': 'Gift List', 'source': 'ML', 'chapter': 'ch1', 'page': 4, 'edition': '4e'}])
+        with open(os.path.join(rules, 'gift-list.json'), 'w', encoding='utf-8') as f:
+            f.write('chapter one')
+        r = self.write()
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("slug 'gift-list' already belongs to ML ch1", r.stderr)
+        self.assertIn('nothing written', r.stderr)
+        with open(os.path.join(rules, 'gift-list.json'), encoding='utf-8') as f:
+            self.assertEqual(f.read(), 'chapter one')
+        self.assertEqual(sorted(os.listdir(rules)), ['_index.json', 'gift-list.json'])
+        self.assertFalse(os.path.exists(os.path.join(self.lib, 'library-data', 'advantages', 'tide-sense.json')))
+        self.assertEqual(self.read('library-data', '_import-log.json'), [])
+
     def test_a_chapter_with_converter_errors_or_lost_words_is_not_written(self):
         report = os.path.join(self.out, '_report.json')
         with open(report, encoding='utf-8') as f:

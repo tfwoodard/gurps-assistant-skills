@@ -240,6 +240,19 @@ class ConvertTest(unittest.TestCase):
         self.assertEqual(report['same_name'], [{'entry': 'modifiers/tide-sense-limitation', 'same_name_as': 'modifiers/tide-sense',
                                                 'told_apart_by': 'kind: limitation / enhancement'}])
 
+    def test_a_name_another_chapter_of_the_book_holds_is_an_error_until_the_plan_gives_a_slug(self):
+        taken = {'rules': {'gift-list': ('ML', 'ch1')}, 'advantages': {'tide-sense': ('ML', 'ch2')}}
+        _, report = convert_traits.convert_chapter(chapter(), json.loads(json.dumps(PLAN)), taken)
+        self.assertEqual([e for e in report['errors'] if 'already has' in e],
+                         ["rules/gift-list (p10): ML ch1 already has an entry rules/gift-list; give this one a `slug` in the "
+                          "plan's entries (and a relation, if the two are read together)"])
+        plan = json.loads(json.dumps(PLAN))
+        plan['entries'] = {'rules/gift-list': {'slug': 'gift-list-ch2', 'relations': [{'role': 'distinct-from', 'to': 'rules/gift-list'}]}}
+        entries, report = convert_traits.convert_chapter(chapter(), plan, taken)
+        self.assertEqual(report['errors'], [])                   # tide-sense is this chapter's own: no error
+        e = next(e for c, e in entries if e['name'] == 'Gift List')
+        self.assertEqual((e['slug'], e['relations']), ('gift-list-ch2', [{'role': 'distinct-from', 'to': 'rules/gift-list'}]))
+
     def test_a_name_another_source_holds_is_a_version_of_it(self):
         entries, report = convert_traits.convert_chapter(chapter(), json.loads(json.dumps(PLAN)),
                                                          {'advantages': {'tide-sense': 'XX'}})
@@ -356,6 +369,48 @@ class SkillsTest(unittest.TestCase):
         _, report = convert_traits.convert_chapter(doc, self.plan())
         self.assertIn("p10: 'Lamp Tending': the line under its name, 'Quite hard', is not an attribute and a difficulty",
                       report['errors'])
+
+
+class SpellsTest(unittest.TestCase):
+    LABELS = {'Duration': 'duration', 'Cost': 'cost', 'Base Cost': 'base_cost', 'Time to cast': 'time_to_cast',
+              'Prerequisite': 'prerequisites', 'Duration, Cost, and Time to cast': ['duration', 'cost', 'time_to_cast']}
+
+    def chapter(self):
+        p = Page()
+        p.line('FOG SPELLS', size=20.0, heading=2, bold=True)
+        p.name('Thicken Fog')
+        p.cost('Area')
+        p.para('The fog grows thick over', 'the marsh.')
+        p.para('Duration: 1 minute, or', 'until dawn.')
+        p.para('Base Cost: 2. Cannot be', 'maintained.')
+        p.name('Lift Fog (VH)')
+        p.cost('Regular; Resisted by')
+        p.cost('the fog’s Will')
+        p.para('The fog lifts from the', 'water.')
+        p.para('Duration, Cost, and Time to', 'cast: As for Thicken Fog.')
+        p.para('Prerequisite: Thicken Fog', 'and Magery 1.')
+        p.name('Fog Song')
+        p.cost('Loud')
+        p.para('You sing.')
+        return {'lines': p.lines, 'regions': []}
+
+    def plan(self):
+        return {'source': 'ML', 'chapter': 'ch5', 'name_size': 14.0, 'cost_size': 11.0, 'icons': [], 'sections': [
+            {'heading': 'Fog Spells', 'page': 10, 'traits': {'category': 'spells', 'kind': 'spell', 'line': 'spell',
+                                                             'marks': {' (VH)': 'very_hard'}, 'labels': self.LABELS,
+                                                             'fields': {'college': 'Fog'}}}]}
+
+    def test_a_spells_class_what_resists_it_and_its_labelled_lines(self):
+        entries, report = convert_traits.convert_chapter(self.chapter(), self.plan())
+        self.assertEqual(report['errors'], ["p10: 'Fog Song': the line under its name, 'Loud', is not a spell class (and what resists it)"])
+        by = {e['slug']: e for c, e in entries if c == 'spells'}
+        self.assertEqual(by['thicken-fog']['fields'], {'kind': 'spell', 'very_hard': False, 'class': 'Area', 'college': 'Fog',
+                                                       'duration': '1 minute, or until dawn.', 'base_cost': '2. Cannot be maintained.'})
+        lift = by['lift-fog']['fields']
+        self.assertEqual((lift['very_hard'], lift['printed_name'], lift['class'], lift['resisted']),
+                         (True, 'Lift Fog (VH)', 'Regular', 'Resisted by the fog’s Will'))
+        self.assertEqual((lift['duration'], lift['cost'], lift['time_to_cast'], lift['prerequisites']),
+                         ('As for Thicken Fog.',) * 3 + ('Thicken Fog and Magery 1.',))
 
 
 class NoCostLineTest(unittest.TestCase):

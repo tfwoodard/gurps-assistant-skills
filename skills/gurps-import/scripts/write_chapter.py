@@ -12,9 +12,11 @@ OUT_DIR is a converter's output: `<category>--<slug>.json` and `.md` for each en
   * check_coverage.py accounts for every word of LAYOUT.json;
   * every record has its entry's two files, and no file is there without a record.
 
-Then, in this order: the entry files (over any there already), each category's `_index.json`
-and the import log (through merge_import.py, which also says which entries a re-import no longer
-has: their files are removed), and last `library.json`, where the chapter becomes `imported`.
+Every category's index and the import log are merged first, in scratch (merge_import.py, which
+also says which entries a re-import no longer has); a merge that refuses stops the write with
+nothing in the library changed. Then, in this order: the entry files (over any there already),
+the removal of entries a re-import no longer has, each category's `_index.json`, the import log,
+and last `library.json`, where the chapter becomes `imported`.
 
 `--target` is the library-data folder under ROOT: `library-data` for a library source,
 `campaigns/<slug>/library-data` or `campaigns/<slug>/gm/library-data` for a campaign's (the
@@ -105,51 +107,54 @@ def main(argv=None):
     target = os.path.join(a.library, *a.target.split('/'))
     log_path = os.path.join(target, '_import-log.json')
     with tempfile.TemporaryDirectory() as tmp:
+        # Pass 1: every merge, into scratch, before anything in the library is touched. A merge
+        # that refuses (a slug another chapter holds, say) stops the write with nothing changed.
+        log_in = log_path
+        if not os.path.exists(log_in):
+            log_in = os.path.join(tmp, 'empty-log.json')
+            with open(log_in, 'w', encoding='utf-8') as f:
+                f.write('[]\n')
+        merged = {}
         for cat in categories:
-            folder = os.path.join(target, cat)
-            index_path = os.path.join(folder, '_index.json')
+            index_path = os.path.join(target, cat, '_index.json')
             mine = sorted(slug for c, slug in files if c == cat)
-            if not a.dry_run:
+            work = os.path.join(tmp, cat)
+            cmd = [sys.executable, os.path.join(HERE, 'merge_import.py'), '--out', work,
+                   '--records', os.path.join(a.out, '_records.json'), '--edition', edition,
+                   '--source', a.source, '--chapter', a.chapter, '--category', cat, '--date', date,
+                   '--log-notes', a.notes, '--log', log_in]
+            if os.path.exists(index_path):
+                cmd += ['--index', index_path]
+            r = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
+            if r.returncode != 0:
+                sys.exit(f'merge_import.py ({cat}): {r.stderr.strip() or r.stdout.strip()}; nothing written')
+            have = {x['slug'] for x in load(os.path.join(work, '_index.json'))}
+            lost = [s for s in mine if s not in have]
+            if lost:
+                sys.exit(f'{cat}/_index.json would lack {", ".join(lost[:5])} after the merge; nothing written')
+            line = next(l for l in r.stdout.splitlines() if l.startswith('_index.json:'))
+            gone = next((l.split(': ', 1)[1].split(', ') for l in r.stdout.splitlines()
+                         if l.strip().startswith('No longer in this chapter')), [])
+            summary['categories'][cat] = {'entries': len(mine), 'index': line.split(': ', 1)[1], 'removed': gone}
+            merged[cat] = (work, mine, gone)
+            log_in = os.path.join(work, '_import-log.json')        # the next category's log carries this one's record
+        # Pass 2: the entries, then each index, the log, and last library.json.
+        if not a.dry_run:
+            for cat, (work, mine, gone) in merged.items():
+                folder = os.path.join(target, cat)
                 os.makedirs(folder, exist_ok=True)
                 for slug in mine:
                     for ext in ('.json', '.md'):
                         shutil.copyfile(files[(cat, slug)] + ext, os.path.join(folder, slug + ext))
                         if not same(files[(cat, slug)] + ext, os.path.join(folder, slug + ext)):
                             sys.exit(f'{cat}/{slug}{ext}: the copy does not match')
-            work = os.path.join(tmp, cat)
-            cmd = [sys.executable, os.path.join(HERE, 'merge_import.py'), '--out', work,
-                   '--records', os.path.join(a.out, '_records.json'), '--edition', edition,
-                   '--source', a.source, '--chapter', a.chapter, '--category', cat, '--date', date,
-                   '--log-notes', a.notes]
-            if os.path.exists(index_path):
-                cmd += ['--index', index_path]
-            if os.path.exists(log_path):
-                cmd += ['--log', log_path]
-            else:
-                empty = os.path.join(tmp, 'empty-log.json')
-                with open(empty, 'w', encoding='utf-8') as f:
-                    f.write('[]\n')
-                cmd += ['--log', empty]
-            r = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
-            if r.returncode != 0:
-                sys.exit(f'merge_import.py ({cat}): {r.stderr.strip() or r.stdout.strip()}')
-            line = next(l for l in r.stdout.splitlines() if l.startswith('_index.json:'))
-            gone = next((l.split(': ', 1)[1].split(', ') for l in r.stdout.splitlines()
-                         if l.strip().startswith('No longer in this chapter')), [])
-            summary['categories'][cat] = {'entries': len(mine), 'index': line.split(': ', 1)[1], 'removed': gone}
-            if a.dry_run:
-                continue
-            shutil.copyfile(os.path.join(work, '_index.json'), index_path)
-            shutil.copyfile(os.path.join(work, '_import-log.json'), log_path)
-            for slug in gone:                       # a re-import no longer has these entries
-                for ext in ('.json', '.md'):
-                    path = os.path.join(folder, slug + ext)
-                    if os.path.exists(path):
-                        os.remove(path)
-            have = {r['slug'] for r in load(index_path)}
-            lost = [s for s in mine if s not in have]
-            if lost:
-                sys.exit(f'{cat}/_index.json lacks {", ".join(lost[:5])} after the merge')
+                for slug in gone:                       # a re-import no longer has these entries
+                    for ext in ('.json', '.md'):
+                        path = os.path.join(folder, slug + ext)
+                        if os.path.exists(path):
+                            os.remove(path)
+                shutil.copyfile(os.path.join(work, '_index.json'), os.path.join(folder, '_index.json'))
+            shutil.copyfile(log_in, log_path)
     if in_library and not a.dry_run:
         chapter.update(status='imported', date=date, notes=a.notes)
         with open(lib_path, 'w', encoding='utf-8', newline='\n') as f:

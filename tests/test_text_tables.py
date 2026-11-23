@@ -38,6 +38,29 @@ def table(rows, header, y=200.0):
     return [line(y, header, True)] + [line(y + 11 * (i + 1), r) for i, r in enumerate(rows)]
 
 
+class KeyedListTest(unittest.TestCase):
+    def test_results_keyed_by_a_roll_become_one_list_with_their_keys(self):
+        lines = [line(190.0, [(60, 'Roll 3d on the table below.')]),
+                 line(201.0, [(60, '3 – The lamp goes out.')]),
+                 line(212.0, [(60, '4-5 – The lamp flickers, and the')]),
+                 line(223.0, [(72, 'keeper sees shapes.')]),
+                 line(234.0, [(60, '6+ – Nothing happens.')]),
+                 line(250.0, [(60, 'Then roll again.')])]
+        report = {'errors': [], 'questions': []}
+        out = entry_text.with_keyed_lists(lines, report, 'rules/lamps')
+        self.assertEqual([bool(l.get('block')) for l in out], [False, True, False])
+        block = out[1]['block']
+        self.assertEqual(block['keys'], ['3', '4-5', '6+'])
+        self.assertEqual(block['items'], ['3 – The lamp goes out.', '4-5 – The lamp flickers, and the keeper sees shapes.',
+                                          '6+ – Nothing happens.'])
+        self.assertEqual(report['keyed_lists'], [{'entry': 'rules/lamps', 'page': 10, 'items': 3, 'keys': ['3', '4-5', '6+']}])
+
+    def test_fewer_than_three_keyed_lines_are_text(self):
+        lines = [line(201.0, [(60, '3 – The lamp goes out.')]), line(212.0, [(60, '4 – It is lit again.')])]
+        report = {'errors': [], 'questions': []}
+        self.assertEqual(entry_text.with_keyed_lists(lines, report, 'rules/lamps'), lines)
+
+
 class TextTableTest(unittest.TestCase):
     def read(self, lines):
         report = {'errors': [], 'questions': []}

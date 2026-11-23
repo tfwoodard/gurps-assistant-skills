@@ -217,7 +217,7 @@ Each category folder in a `library-data/` holds:
   | advantages    | `kind` (advantage, perk, language, cultural-familiarity, feature), `types` (as printed: mental, physical, social; exotic, supernatural), `cost` (as printed: "15 points", "5 points/level", "Variable"), `leveled` (true/false) |
   | disadvantages | `kind` (disadvantage, quirk), `types`, `cost` (as printed, its asterisk too), `self_control` (true when the cost carries the asterisk that marks a self-control number) |
   | skills        | `kind` (skill, technique), `attribute` (as printed: DX, IQ, "DX or IQ"; a technique has none), `difficulty` (as printed: Easy, Average, Hard, Very Hard, Varies), `defaults` and `prerequisites` (as printed), `tl` (true for a /TL skill), `specialties` (true when the list marks the skill as taking a specialty), `printed_name` when the list prints marks after the name, `starred` (a technique whose name carries an asterisk) |
-  | spells        | `kind` (spell, or the system's own word), `college`, `class` (as printed: Regular, Area, Missile…), `duration`, `cost`, `time_to_cast`, `prerequisites` (as printed) |
+  | spells        | `kind` (spell, or the system's own word), `college`, `class` (as printed: Regular, Area, "Information; Area"…), `resisted` (as printed: "Resisted by HT"), `duration`, `cost`, `base_cost` (an Area spell's), `time_to_cast`, `prerequisites`, `modifiers` (each as printed, from the spell's labelled lines), `very_hard` (true for a spell printed with "(VH)"), `printed_name` when it is |
   | modifiers     | `kind` (enhancement, limitation), `cost` (as printed: "+50%", "−10%/level"), `applies_to` (the traits it is printed for, when it isn't general) |
   | templates     | `kind` (racial, occupational, meta-trait, lens), `points` |
   | equipment     | `kind` (melee-weapon, ranged-weapon, armor, shield, gear, vehicle, …), `tl`, `cost`, `weight`, `lc` |
@@ -294,7 +294,7 @@ wording, with bold and italic as Markdown marks:
 |---|---|
 | `heading` | `level`, `text` |
 | `paragraph` | `text` |
-| `list` | `ordered`, `items` (strings, or `{"text", "items"}` for an item with a sublist) |
+| `list` | `ordered`, `items` (strings, or `{"text", "items"}` for an item with a sublist), and `keys` for a list of results keyed by a roll ("3 – …", "5-6 – …"): each item's key, as printed |
 | `fields` | `title`, `items`: `[{"label", "text"}]` (a spell's "Duration: 1 minute" lines, a skill's "Defaults:" line) |
 | `table` | `title`, `columns`, `rows` (cells as printed), `groups` (`{"before": row, "text"}` for rows that head the rows below), `footnotes`, `data`, and `read_with` for a table set in an entry's text (below) |
 | `sidebar` | `title`, `content` (blocks) |
