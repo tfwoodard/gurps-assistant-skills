@@ -133,6 +133,22 @@ class TextTableTest(unittest.TestCase):
         self.assertTrue(entry_text.is_table_header(l))
         self.assertFalse(entry_text.is_table_header(line(200.0, [(60, 'Fog 2')])))
 
+    def test_a_table_set_as_two_side_by_side_is_read_one_after_the_other(self):
+        header = [line(200.0, [(60, 'Skill'), (110, 'Chance'), (200, 'Skill'), (250, 'Chance')], True)]
+        rows = [line(211.0, [(60, '3'), (110, '1%'), (200, '5'), (250, '5%')]),
+                line(222.0, [(60, '4'), (110, '2%'), (200, '6'), (250, '9%')])]
+        report = {'errors': [], 'questions': []}
+        block = entry_text.table_block(header, rows, report, 'rules/odds', 'The Odds', 2)
+        self.assertEqual((block['title'], block['columns']), ('The Odds', ['Skill', 'Chance']))
+        self.assertEqual(block['rows'], [['3', '1%'], ['4', '2%'], ['5', '5%'], ['6', '9%']])
+        self.assertEqual(report['folded_keys'],
+                         [{'region': 'Skill Chance Skill Chance', 'entry': 'rules/odds', 'cells': ['Skill', 'Chance']}])
+        self.assertEqual(report['tables'][0]['folded'], 2)
+        report = {'errors': [], 'questions': []}
+        header = [line(200.0, [(60, 'Skill'), (110, 'Chance'), (200, 'Rank'), (250, 'Chance')], True)]
+        self.assertIsNone(entry_text.table_block(header, rows, report, 'rules/odds', '', 2))
+        self.assertIn('does not fold into 2 parts with the same column names', report['errors'][0])
+
     def test_a_cell_that_lines_up_with_nothing_fails_the_table_and_leaves_its_lines(self):
         t = table([[(70, '1 mile'), right(190, '2 points')],
                    [(70, '10 miles'), right(190, '5 points')],

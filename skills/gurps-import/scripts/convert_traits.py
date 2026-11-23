@@ -47,15 +47,24 @@ single lines that are not text of the chapter.
 
 A box that is a table on a tinted panel of its own (the layout marks it `bands`) belongs to an
 entry: `into` names it, and `under` a heading in it to put the table straight after (else it goes
-at the entry's end).
+at the entry's end); `title_lines` says how many of its first lines are its title, and `fold` that it
+is set as that many like tables side by side, to be read one after another.
 
 `sections` names only the sections that are trait lists (matched by heading and page; a heading
-set over two or more lines is given joined). A list whose traits print no cost line of their own,
-because the section's text gives one cost for all (perks), has `"no_cost_line": true` in its
-`traits`, with the cost the text states under `fields`; `"starred": "self_control"` there makes a field of
-the asterisk the list prints after some costs (true where a cost ends in one); `"name_size"` there is the size its
-traits' names are set in, when it is not the chapter's. `--taken` gives the slugs other sources hold: a
-trait of the same name in the same category becomes a `version-of` it (docs/adr/0007).
+set over two or more lines is given joined). A list's `traits` can also say:
+
+  * `"line": "skill"` when the line under a name is an attribute and a difficulty ("IQ/Hard"), and
+    `"technique"` when it is a difficulty alone: read into `attribute` and `difficulty`;
+  * `"marks": {"†": "specialties", "/TL": "tl"}` for marks printed after a name, each a
+    true-or-false field (the name loses them, and `printed_name` keeps it as printed);
+  * `"labels": {"Defaults": "defaults"}` for labelled paragraphs that are fields as well as text;
+  * `"starred": "self_control"` to make a field of the asterisk a list prints after some costs;
+  * `"no_cost_line": true` for a list whose traits print no line of their own because the
+    section's text gives one cost for all (perks), with that cost under `fields`;
+  * `"name_size"` for the size its traits' names are set in, when it is not the chapter's.
+
+`--taken` gives the slugs other sources hold: a trait of the same name in the same category
+becomes a `version-of` it (docs/adr/0007).
 
 Writes OUT_DIR/<category>--<slug>.json and .md, `_records.json` (index records, each with
 `_category`) and `_report.json`: `errors` (the conversion is not to be used while there are
@@ -73,7 +82,10 @@ from entry_text import (blocks_from_lines, fix_case, is_table_header, mark_parag
                         slugify, table_block, vocabulary, with_text_tables)
 from render_entry import render  # noqa: E402
 
-PRINTED_FIELDS = ('cost', 'types', 'see')        # fields that hold words printed on the page
+# fields that hold words printed on the page
+PRINTED_FIELDS = ('cost', 'types', 'see', 'attribute', 'difficulty', 'printed_name')
+SKILL_LINE = re.compile(r'^(?P<attribute>(?:ST|DX|IQ|HT|Will|Per)(?: or (?:ST|DX|IQ|HT|Will|Per))*)/(?P<difficulty>[A-Z][A-Za-z ]+)$')
+TECHNIQUE_LINE = re.compile(r'^(?P<difficulty>Average|Hard)$')
 SEE = re.compile(r'^see\b', re.I)
 
 
@@ -232,13 +244,23 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None):
                                        'why': 'a heading with nothing under it but other entries'})
         for m, j in enumerate(starts):
             name_run = inner[j][1]
-            printed = heading_text(name_run)
+            # as printed, an asterisk after it too (plain() would take that for a mark of emphasis)
+            printed = ' '.join(l['text'].strip() for l in name_run)
             name, types, tail = split_name(printed, icons)
             page = name_run[0]['page']
             if name is None:
                 report['errors'].append(f'p{page}: {printed!r}: words after the type icons; if this is not a '
                                         f'trait\'s name, list it in the plan\'s not_traits')
                 continue
+            # marks a list prints after a name (a dagger for "takes a specialty", /TL for a
+            # skill that differs by tech level): fields of their own, and off the name
+            marked_as = {field: False for field in t.get('marks', {}).values()}
+            bare = name
+            while any(bare.endswith(mk) for mk in t.get('marks', {})):
+                mk = next(x for x in t['marks'] if bare.endswith(x))
+                marked_as[t['marks'][mk]] = True
+                bare = bare[:-len(mk)].rstrip()
+            as_printed, name = name, bare
             printed_name, key = name, rename_key(page, name, title)
             again = {}
             if key:
@@ -279,10 +301,23 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None):
             else:
                 # as printed, its asterisk too: plain() would take that for a mark of emphasis
                 cost = ' '.join(l['text'].strip() for l in cost_lines)
+            fields.update(marked_as)
+            if as_printed != name:
+                fields['printed_name'] = as_printed
+            kind_of_line = t.get('line', 'cost')
             if cost is None:
                 pass
             elif SEE.match(cost):
                 fields['see'] = cost
+            elif kind_of_line in ('skill', 'technique'):
+                # a skill's line gives its controlling attribute and its difficulty ("IQ/Hard");
+                # a technique's, its difficulty alone
+                hit = (SKILL_LINE if kind_of_line == 'skill' else TECHNIQUE_LINE).match(cost)
+                if not hit:
+                    report['errors'].append(f'p{page}: {name!r}: the line under its name, {cost!r}, is not '
+                                            + ('an attribute and a difficulty' if kind_of_line == 'skill' else 'a difficulty'))
+                    continue
+                fields.update(hit.groupdict())
             else:
                 fields['cost'] = cost
                 fields['leveled'] = bool(re.search(r'/\s*level', cost))
@@ -291,8 +326,17 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None):
                     # own (for disadvantages: the trait takes a self-control number)
                     fields[t['starred']] = cost.endswith('*')
             fields.update(t.get('fields', {}))
-            add(t['category'], name, name_run[0], title, fields, rest, name_run[0].get('heading', level + 1),
-                t.get('name_size', name_size), again)
+            entry = add(t['category'], name, name_run[0], title, fields, rest, name_run[0].get('heading', level + 1),
+                        t.get('name_size', name_size), again)
+            # labelled paragraphs the list gives each trait ("Defaults: IQ-5 or ..."): fields too,
+            # as printed; they stay in the text where they are
+            for b in entry['content']:
+                if b['type'] != 'paragraph':
+                    continue
+                text = plain(b['text'])
+                label, colon, rest_of = text.partition(':')
+                if colon and label in t.get('labels', {}) and t['labels'][label] not in entry['fields']:
+                    entry['fields'][t['labels'][label]] = rest_of.strip()
 
     for key in set(renames) - renamed:
         report['errors'].append(f'plan rename: no trait {key[1]!r} on p{key[0]}')
@@ -324,11 +368,13 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None):
                     + (f'the plan puts it `into` {target}, which is no entry of the chapter' if target else
                        'say which entry it belongs to with `into` in the plan\'s boxes'))
                 continue
+            # its title, when it has one: the plan says how many of its first lines are that
+            title_lines, bl = bl[:bp.get('title_lines', 0)], bl[bp.get('title_lines', 0):]
             k = next((i for i, l in enumerate(bl) if not is_table_header(l)), len(bl))
             if k == 0 or len(bl) - k < 2:
                 report['errors'].append(f'box {bid} (p{region["page"]}): no header line and two rows to read as a table')
                 continue
-            block = table_block(bl[:k], bl[k:], report, target)
+            block = table_block(bl[:k], bl[k:], report, target, ' '.join(l['text'] for l in title_lines), bp.get('fold'))
             if block is None:
                 continue
             blocks = owner['content']

@@ -84,6 +84,22 @@ class DrawnFrameTest(unittest.TestCase):
         self.assertEqual(outside, {'Keepers trim the wicks at dusk.', 'Gulls circle the tower all day.'})
 
 
+@unittest.skipUnless(HAVE_LIBS, 'reportlab is needed to draw the fixture PDF')
+class NotABoxTest(unittest.TestCase):
+    def test_a_frame_the_plan_says_is_no_panel_leaves_its_words_with_the_page(self):
+        with tempfile.TemporaryDirectory() as d:
+            pdf, out = os.path.join(d, 'page.pdf'), os.path.join(d, 'layout.json')
+            draw_page(pdf)
+            r = subprocess.run([sys.executable, os.path.join(SCRIPTS, 'pdf_layout.py'), pdf, '--pages', '1',
+                                '--boxes', '--not-boxes', '1.1', '--out', out], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            with open(out, encoding='utf-8') as f:
+                doc = json.load(f)
+        self.assertEqual(doc['regions'], [])
+        self.assertFalse(any(l.get('box') for l in doc['lines']))
+        self.assertIn('Storm Lamps', [l['text'] for l in doc['lines']])
+
+
 class ThinBandsTest(DrawnFrameTest):
     """The same panel with its tint laid in strokes as thin as a rule: still a tint, not a table."""
     band = 2.4

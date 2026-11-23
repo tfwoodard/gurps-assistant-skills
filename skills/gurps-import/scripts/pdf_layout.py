@@ -90,6 +90,7 @@ from pdfminer.pdffont import PDFSimpleFont
 # font (`case_fixed` in the output). Small-caps fonts ("-SC" in the name) are left alone: they set
 # their small capitals at those codes too, and entry_text.fix_case() restores those words.
 CASE_FIXED = collections.Counter()
+NOT_BOXES = set()                        # ids of frames that are no panels (--not-boxes)
 REPLACE_CHARS = {}                       # characters a book's fonts give wrongly -> what the page prints (--replace-chars)
 CHARS_REPLACED = collections.Counter()
 _to_unichr = PDFSimpleFont.to_unichr
@@ -917,6 +918,8 @@ def page_lines(page, page_no, icon_fonts=(), marks=None, shapes=None, regions=No
     for w in words:
         cx, cy = (w['x0'] + w['x1']) / 2, (w['top'] + w['bottom']) / 2
         for i, (x0, top, x1, bottom) in enumerate(boxes):
+            if f'{page_no}.{i + 1}' in NOT_BOXES:      # a frame the plan says is no panel: its words are the page's
+                continue
             if x0 <= cx <= x1 and top <= cy <= bottom:
                 in_box[id(w)] = i
                 break
@@ -1035,8 +1038,10 @@ def assign_headings(lines):
 
 
 def read(pdf_path, first, last, offset, icon_fonts=(), boxes=False, icon_text=None, margin_lines=(),
-         aside_fonts=(), icons_alone=False, replace_chars=None):
+         aside_fonts=(), icons_alone=False, replace_chars=None, not_boxes=()):
     CASE_FIXED.clear()
+    NOT_BOXES.clear()
+    NOT_BOXES.update(not_boxes)
     REPLACE_CHARS.clear()
     REPLACE_CHARS.update(replace_chars or {})
     CHARS_REPLACED.clear()
@@ -1132,6 +1137,9 @@ def main(argv=None):
                     help='a character the PDF gives wrongly and the one the page prints, for a font whose '
                          'encoding misnames a glyph (a multiplication sign read as a yen sign); each is counted '
                          'in `chars_replaced`')
+    ap.add_argument('--not-boxes', nargs='*', default=[], metavar='PAGE.N',
+                    help='boxes, by the id a first reading gave them, that are no panels (a frame drawn round a '
+                         'picture that text runs past): their words are read with the page')
     ap.add_argument('--icons-alone', action='store_true',
                     help='with --icon-text: an icon glyph with no text beside it makes a line of its own '
                          '(icons turned over to the line under a heading); otherwise it is left out of the text')
@@ -1153,7 +1161,7 @@ def main(argv=None):
         if not at or not font:
             sys.exit(f'--aside-fonts {x}: write FONT@SIZE, e.g. Garamond-Italic@14')
     doc = read(a.pdf, first, last, a.page_offset, a.icon_fonts, a.boxes, icon_text, a.margin_lines, aside_fonts,
-               a.icons_alone, dict(x.split('=', 1) for x in a.replace_chars))
+               a.icons_alone, dict(x.split('=', 1) for x in a.replace_chars), a.not_boxes)
     if doc['pages_without_text']:
         print('no text layer on printed pages ' + ', '.join(map(str, doc['pages_without_text'])) +
               ': look at the page images, and ask before running OCR', file=sys.stderr)
