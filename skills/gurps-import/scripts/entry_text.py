@@ -792,6 +792,25 @@ def read_text_table(header, rows):
     # A line with nothing in the first column, under a row, carries on that row's cells (a cell
     # too long for its column: "special – see" / "the notes"). Its words join the row's; only a
     # row's first line is held to the alignment check.
+    # A line with nothing but its first column, straight over a full row, is the first line of
+    # that row's name, set over two lines with the cells on its last ("Rope-down" / "(w/o
+    # equipment) -1 2 ft/sec ..."), when the second reads on from it (a small letter or a
+    # bracket starts it, or the first breaks off at a hyphen or comma); else a cell is missing.
+    def reads_on(first, second):
+        return bool(re.match(r'[a-z(\[]', second[0][0])) or first[-1][0].endswith(('-', ','))
+
+    g2, r2, k = [], [], 0
+    while k < len(grid):
+        r = grid[k]
+        if r[0] and not any(r[1:]) and k + 1 < len(grid) and all(grid[k + 1]) and reads_on(r[0], grid[k + 1][0]):
+            g2.append([r[0] + grid[k + 1][0]] + [list(c) for c in grid[k + 1][1:]])
+            r2.append(dict(rows[k], text=rows[k]['text'] + ' ' + rows[k + 1]['text']))
+            k += 2
+        else:
+            g2.append(r)
+            r2.append(rows[k])
+            k += 1
+    grid, rows = g2, r2
     first_lines, merged = [], []
     for r, l in zip(grid, rows):
         if merged and not r[0] and any(r[1:]):
@@ -925,7 +944,7 @@ def with_text_tables(lines, report, where):
 
 # --- lists keyed by a roll or a number ---------------------------------------------------------
 
-KEY = re.compile(r'^\s*(?P<key>\d+(?:\s*[-–]\s*\d+)?\+?)\s+[–—-]\s+\S')
+KEY = re.compile(r'^\s*(?P<key>\d+(?:\s*[-–]\s*\d+|(?:\s*,\s*\d+)+)?\+?)\s+[–—-]\s+\S')   # "3", "5-6", "14, 15", "40+"
 
 
 def with_keyed_lists(lines, report, where, vocab=None):
@@ -959,7 +978,10 @@ def with_keyed_lists(lines, report, where, vocab=None):
             edge = edges[where_(lines[j])]
             run = [lines[j]]
             j += 1
-            while j < len(lines) and not lines[j].get('heading') and not lines[j].get('block') and                     where_(lines[j]) == where_(run[0]) and not item_start(lines[j], edges) and                     (lines[j]['x0'] > edge + 3 or ('para' in lines[j] and not lines[j]['para'])):
+            # (an item's later lines: set in further, or running on as the paragraph reader says,
+            # into the next column or page too, where the item carries over the turn)
+            while j < len(lines) and not lines[j].get('heading') and not lines[j].get('block') and                     not item_start(lines[j], edges) and lines[j].get('box') == l.get('box') and                     ((where_(lines[j]) == where_(run[0]) and lines[j]['x0'] > edge + 3) or
+                     ('para' in lines[j] and not lines[j]['para'])):
                 run.append(lines[j])
                 j += 1
             items.append(run)
