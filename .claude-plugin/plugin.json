@@ -1,7 +1,7 @@
 {
   "name": "gurps-assistant",
   "description": "GURPS (4th edition) table assistant: imports game material from your own PDFs, homebrew and GURPS Character Assistant data files into a private Google Drive library, then answers rules questions, reads and updates GCA characters, and keeps searchable campaign session notes.",
-  "version": "0.1.18",
+  "version": "0.1.19",
   "author": {
     "name": "tfwoodard"
   },

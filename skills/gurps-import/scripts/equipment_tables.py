@@ -4,15 +4,21 @@ A table is a title ("Lamp Table"), then groups. A group is a heading line (a ski
 defaults, "LAMPS (DX-4, Torch-2)", or a kind, "Hand Lamps"), sometimes a header row in
 italics (TL, Weapon, Damage...; a header carries on over later groups until another is printed), and
 rows. A row whose first column is empty ("or" in the Weapon column) is another way of using the item
-above it: another attack mode. After the groups, a line "Notes" heads numbered notes ("[1] ...").
-A table can run over several pages, and from a boxed panel onto the page.
+above it: another attack mode. A row whose name runs on to a second line, set in, with the row's
+cells on that line, is one row. A header word in brackets ("Lift (G)") names one column with the
+word before it. After the groups come numbered notes ("[1] ..."), under a line "Notes" or with
+none; a table on a panel may have its notes printed under the panel, on the page
+(`"notes_below": true`). A table can run over several pages, and from a boxed panel onto the page.
 
 take_tables() takes each table the plan names out of a chapter's lines and makes of it:
 
   * a `tables` entry, named by the title: each group as a heading and a table block, and the notes;
   * an `equipment` entry for each item, named as printed in its row: its rows as a table block
     under its group's heading, and the notes its rows cite. An item printed in more than one table
-    (a spear for melee and for throwing) is one entry with each table's rows. Its fields: `kind`
+    (a spear for melee and for throwing), or in two groups of one table (a sword used with either
+    of two skills), is one entry with each table's rows; but one name printed twice in one group,
+    at two TLs, is two items, each named with its TL ("Kite (TL1)", "Kite (TL2)"), the later
+    distinct-from the first (as GCA's data files give them). Its fields: `kind`
     (the plan's), `group` (each group it is in, as printed), and its first row's cells by column
     (`tl`, `cost`, `weight`, `lc`... as printed), with `modes` holding every row's cells when it has
     more than one.
@@ -125,7 +131,7 @@ def aligned(col):
     return [k for k in range(len(col)) if not any(abs(ways[way][k] - x) <= ALIGN_TOLERANCE for way, x in lines.items())]
 
 
-def read_table(spec, lines, report, vocab):
+def read_table(spec, lines, report, vocab, extra_notes=()):
     """One table's lines (title first) -> (groups, notes, failures). A group is
     {'heading', 'columns', 'rows': [cells]}; notes are {number: text}."""
     first_word = spec.get('header_starts', 'TL')
@@ -158,6 +164,10 @@ def read_table(spec, lines, report, vocab):
             # "Notes" set on the line of the first note
             in_notes = True
             notes_lines.append(dict(l, text=text[len('Notes '):], words=l['words'][1:]))
+        elif NOTE.match(text) and parts and parts[-1][1] and parts[-1][1][-1][1]:
+            # the first numbered note after the rows, with no "Notes" line over the notes
+            in_notes = True
+            notes_lines.append(l)
         elif is_header(l, first_word):
             # a header printed under a group's heading, before its rows, heads that group too
             if parts and parts[-1][1] and not parts[-1][1][-1][1]:
@@ -204,6 +214,25 @@ def read_table(spec, lines, report, vocab):
         all_rows = pooled[header_key(header)]
         seps = split_by_header(header, all_rows, columns_of(header, all_rows, size))
         head_cells = header_cells(header, all_rows, seps)
+        # a header word in brackets qualifies the word before it ("Speed (mph)"): one column, though
+        # in a table of few rows the bracketed part of each cell can leave a blank of its own
+        k = 1
+        while k < len(head_cells):
+            if head_cells[k] and all(w[0].startswith('(') and w[0].endswith(')') for w in head_cells[k]) and \
+                    head_cells[k - 1]:
+                head_cells[k - 1:k + 1] = [head_cells[k - 1] + head_cells[k]]
+                del seps[k - 1]
+                report.setdefault('columns_joined_by_header', []).append(
+                    f'{plain(title["text"])}: {" ".join(w[0] for w in head_cells[k - 1])}')
+            else:
+                k += 1
+        # ... and is one header word with it, not a second column to split the cells for
+        def bracketed(w):
+            return w[0].startswith('(') and w[0].endswith(')')
+
+        head_cells = [[w for j, w in enumerate(c) if not (j and bracketed(w))] for c in
+                      [[(f'{w[0]} {c[j + 1][0]}', w[1], c[j + 1][2]) if j + 1 < len(c) and bracketed(c[j + 1]) else w
+                        for j, w in enumerate(c)] for c in head_cells]]
         columns = [' '.join(w[0] for w in c) for c in head_cells]
         for k, c in enumerate(columns):
             if not c:
@@ -233,16 +262,29 @@ def read_table(spec, lines, report, vocab):
         columns = [' '.join(w[0] for w in c) for c in head_cells]
         # a line that carries on a row's cells (a damage that does not fit on one line): nothing
         # in its first two columns, and the row before it has its own first column
+        # A line with nothing past the name column ("2 Glass" / "Lantern 5 yd ..."): the name runs
+        # on to the next line, which has nothing in the first column; the two are one row.
+        name_col = spec.get('name_column', 1)
         merged_rows = []
         for r in rows:
             cells = grid[id(r)]
+            prev = grid[id(merged_rows[-1][0][-1])] if merged_rows else None
             if merged_rows and not cells[0] and len(cells) > 1 and not cells[1] and \
                     any(cells[2:]) and merged_rows[-1][1]:
                 merged_rows[-1][0].append(r)
+            elif merged_rows and len(merged_rows[-1][0]) == 1 and prev[0] and prev[name_col] and \
+                    not any(prev[name_col + 1:]) and not cells[0] and cells[name_col] and any(cells[name_col + 1:]):
+                merged_rows[-1][0].append(r)
+                report.setdefault('names_over_two_lines', []).append(
+                    f'{plain(title["text"])}: {" ".join(w[0] for w in prev[name_col] + cells[name_col])}')
             else:
                 merged_rows.append(([r], bool(cells[0])))
+        run_on = set()                         # the second line of a name: set in from the column
+        for rs, _ in merged_rows:
+            if len(rs) == 2 and not grid[id(rs[1])][0] and grid[id(rs[1])][name_col]:
+                run_on.add(id(rs[1]))
         for k in range(len(seps) + 1):
-            col = [grid[id(r)][k] for r in rows if grid[id(r)][k]]
+            col = [grid[id(r)][k] for r in rows if grid[id(r)][k] and not (k == name_col and id(r) in run_on)]
             if len(col) >= 2:
                 for j in aligned(col):
                     failures.append(f'in column {k + 1} ({columns[k]}), {" ".join(w[0] for w in col[j])!r} does not '
@@ -263,7 +305,7 @@ def read_table(spec, lines, report, vocab):
                            'columns': columns, 'rows': out_rows})
     notes = {}
     order = []
-    for l in notes_lines:
+    for l in notes_lines + list(extra_notes):
         m = NOTE.match(plain(l['text']))
         if m:
             order.append([m.group(1), [marked(l)]])
@@ -292,9 +334,34 @@ def table_end(lines, i, spec):
     return len(lines)
 
 
-def take_tables(lines, plan, report, vocab, source, chapter):
+def notes_below(lines, title, regions, taken):
+    """The numbered notes printed on the page under a table's panel, outside it: the lines below
+    the panel and above the next panel down the page (or the page's foot), in reading order
+    (each column down, left column first). -> (lines, failure or None). Every column's first
+    line there must open a note ("[1] ..."); else nothing is taken."""
+    box = next((r for r in regions if r['id'] == title.get('box')), None)
+    if box is None or 'bbox' not in box:
+        return [], f'notes_below: the title is not on a panel'
+    bottom = box['bbox'][3]
+    below = [r['bbox'][1] for r in regions if r['page'] == title['page'] and r.get('bbox') and r['bbox'][1] > bottom - 1]
+    limit = min(below, default=float('inf'))
+    got = [l for l in lines if l['page'] == title['page'] and not l.get('box') and not l.get('furniture') and
+           id(l) not in taken and l['top'] >= bottom - 1 and l['baseline'] <= limit]
+    order = {'left': 0, 'full': 0, 'right': 1}
+    got.sort(key=lambda l: (order.get(l.get('column'), 0), l['top']))
+    for col in {l.get('column') for l in got}:
+        first = next(l for l in got if l.get('column') == col)
+        if not NOTE.match(plain(first['text'])):
+            return [], f'notes_below: under the panel, {first["text"][:50]!r} opens no note'
+    if not got:
+        return [], 'notes_below: no notes under the panel'
+    return got, None
+
+
+def take_tables(lines, plan, report, vocab, source, chapter, regions=()):
     """Take the plan's equipment tables out of `lines`. Returns (the other lines, entries as
-    (category, entry))."""
+    (category, entry)). A table on a panel whose notes are printed under the panel, on the page
+    (`"notes_below": true` in its spec), takes them from there (notes_below())."""
     specs = plan.get('equipment_tables', [])
     entries, items, table_notes = [], {}, {}
     taken = set()
@@ -307,7 +374,11 @@ def take_tables(lines, plan, report, vocab, source, chapter):
         j = table_end(lines, i, spec)
         region = lines[i:j]
         taken |= {id(l) for l in region}
-        groups, notes, failures = read_table(spec, region, report, vocab)
+        extra, failure = notes_below(lines, region[0], regions, taken) if spec.get('notes_below') else ([], None)
+        taken |= {id(l) for l in extra}
+        groups, notes, failures = read_table(spec, region, report, vocab, extra)
+        if failure:
+            failures.append(failure)
         name = spec.get('name', plain(region[0]['text']).strip())
         table_notes[name] = notes
         report.setdefault('equipment_tables', []).append({
@@ -329,15 +400,39 @@ def take_tables(lines, plan, report, vocab, source, chapter):
                                    'section': spec.get('section', name), 'page': region[0]['page'],
                                    'fields': {'kind': 'equipment', 'about': spec.get('about', name)},
                                    'level': 2, 'content': content}))
-        # each item
+        # each item. A name one group prints on two rows of their own at different TLs (a kite
+        # of TL1 and one of TL2) is two items, each named with its TL; two at one TL is an error.
+        # (A name printed in two groups is one item, used with either skill.)
+        nc = spec.get('name_column', 1)
+        twice = {}
+        for g in groups:
+            printed = {}
+            for row in g['rows']:
+                if row[0]:
+                    printed.setdefault(slugify(row[nc]), []).append(row[0])
+            twice.update({s_: tls for s_, tls in printed.items() if len(tls) > 1})
+        for s_, tls in twice.items():
+            if len(set(tls)) < len(tls) or groups[0]['columns'][0] != 'TL':
+                report['errors'].append(f'equipment table {name!r}: {s_!r} is printed on {len(tls)} rows of its own, '
+                                        f'not told apart by TL ({", ".join(tls)})')
+            else:
+                report.setdefault('named_with_tl', []).append({'table': name, 'item': s_, 'tls': tls})
         for g in groups:
             keys = [slugify(c).replace('-', '_') or f'column_{k + 1}' for k, c in enumerate(g['columns'])]
             current = None
             for row in g['rows']:
                 if row[0]:
-                    item_name = row[spec.get('name_column', 1)]
+                    item_name = row[nc]
+                    base = slugify(item_name)
+                    if base in twice:
+                        item_name = f'{item_name} (TL{row[0]})'
                     slug = slugify(item_name)
                     current = items.get(slug)
+                    if current is None and base in twice and slug != f'{base}-tl{slugify(twice[base][0])}':
+                        # the later of the two, told apart from the first
+                        related = [{'role': 'distinct-from', 'to': f'equipment/{base}-tl{slugify(twice[base][0])}'}]
+                    else:
+                        related = None
                     if current is None:
                         first = dict(zip(keys, row))
                         fields = {'kind': spec['kind'], 'group': [g['heading']]}
@@ -345,6 +440,8 @@ def take_tables(lines, plan, report, vocab, source, chapter):
                         current = {'slug': slug, 'name': item_name, 'source': source, 'chapter': chapter,
                                    'section': name, 'page': region[0]['page'], 'fields': fields, 'level': 2,
                                    'content': [], '_rows': [], '_tables': [], '_notes': []}
+                        if related:
+                            current['relations'] = related
                         items[slug] = current
                         entries.append(('equipment', current))
                     elif g['heading'] not in current['fields']['group']:

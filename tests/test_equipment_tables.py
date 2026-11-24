@@ -140,6 +140,79 @@ class EquipmentTablesTest(unittest.TestCase):
         self.assertEqual(entries, {})
         self.assertIn("the group 'TORCHES (DX)' has no rows", report['errors'][0])
 
+    def test_numbered_notes_after_the_rows_with_no_notes_line_are_the_notes(self):
+        lines = lamp_table()
+        del lines[9]                                                # the "Notes" line
+        _, entries, report = self.take(lines, {'equipment_tables': PLAN['equipment_tables'][:1]})
+        self.assertEqual(report['errors'], [])
+        self.assertEqual(entries[('tables', 'lamp-table')]['content'][-1]['keys'], ['1', '2'])
+
+    def test_a_name_run_on_to_a_second_line_is_one_row_and_one_item(self):
+        lines = lamp_table()
+        # the name's second line set in under the first, the row's cells on it
+        lines[4:5] = [row(150.0, ['2', 'Glass', '', '', '']), line(161.0, [(90, 'Lantern'), (170, '5 yd'), (220, '$40')])]
+        _, entries, report = self.take(lines, {'equipment_tables': PLAN['equipment_tables'][:1]})
+        self.assertEqual(report['errors'], [])
+        self.assertIn(('equipment', 'glass-lantern'), entries)
+        self.assertEqual(entries[('tables', 'lamp-table')]['content'][1]['rows'][1], ['2', 'Glass Lantern', '5 yd', '$40', ''])
+        self.assertEqual(report['names_over_two_lines'], ['Lamp Table: Glass Lantern'])
+
+    def test_a_header_word_in_brackets_names_one_column_with_the_word_before_it(self):
+        cols = (60, 80, 170, 230)
+        lines = [title(100.0, 'Kite Table'), group(116.0, 'KITE FLYING (DX-4)'),
+                 header(128.0, ['TL', 'Kite', 'Lift', '(G)', 'Cost'], (60, 80, 170, 200, 230)),
+                 row(139.0, ['1', 'Box Kite', '3/9 (1G)', '$5'], cols),
+                 row(150.0, ['2', 'Delta Kite', '4/12 (2G)', '$9'], cols)]
+        _, entries, report = self.take(lines, {'equipment_tables': [{'title': 'Kite Table', 'page': 10, 'kind': 'kite'}]})
+        self.assertEqual(report['errors'], [])
+        self.assertEqual(entries[('tables', 'kite-table')]['content'][1]['columns'], ['TL', 'Kite', 'Lift (G)', 'Cost'])
+        self.assertEqual(entries[('equipment', 'box-kite')]['fields']['lift_g'], '3/9 (1G)')
+
+    def test_a_name_one_group_prints_at_two_tls_is_two_items_named_with_their_tls(self):
+        lines = lamp_table()
+        lines[3] = row(139.0, ['1', 'Glass Lantern', '2 yd', '$10', '[1]'])
+        _, entries, report = self.take(lines, {'equipment_tables': PLAN['equipment_tables'][:1]})
+        self.assertEqual(report['errors'], [])
+        old, new = entries[('equipment', 'glass-lantern-tl1')], entries[('equipment', 'glass-lantern-tl2')]
+        self.assertEqual((old['name'], new['name']), ('Glass Lantern (TL1)', 'Glass Lantern (TL2)'))
+        self.assertNotIn('relations', old)
+        self.assertEqual(new['relations'], [{'role': 'distinct-from', 'to': 'equipment/glass-lantern-tl1'}])
+        self.assertEqual(report['named_with_tl'], [{'table': 'Lamp Table', 'item': 'glass-lantern', 'tls': ['1', '2']}])
+
+    def test_a_name_printed_in_two_groups_of_one_table_is_one_item(self):
+        lines = lamp_table()
+        lines[7] = row(188.0, ['2', 'Glass Lantern', '1 yd', '$40', ''])       # in TORCHES as well
+        _, entries, report = self.take(lines, {'equipment_tables': PLAN['equipment_tables'][:1]})
+        self.assertEqual(report['errors'], [])
+        self.assertEqual(entries[('equipment', 'glass-lantern')]['fields']['group'], ['LAMPS (DX-4)', 'TORCHES (DX)'])
+        self.assertNotIn('named_with_tl', report)
+
+    def test_notes_printed_under_a_tables_panel_in_two_columns_are_its_notes(self):
+        lines = [dict(l, box='10.1') for l in lamp_table()[:9]]   # a panel's lines follow the page's
+        below = [line(300.0, [(60, '[1] Smokes indoors.')]),
+                 line(311.0, [(60, 'Keep a window open.')]),
+                 line(300.0, [(320, '[2] Burns for an hour.')], column='right'),
+                 dict(line(700.0, [(320, '10 LAMPS')], column='right'), furniture=True)]
+        regions = [{'id': '10.1', 'page': 10, 'kind': 'box', 'bbox': [50, 90, 560, 280]}]
+        plan = {'equipment_tables': [dict(PLAN['equipment_tables'][0], notes_below=True)]}
+        report = {'errors': [], 'questions': []}
+        rest, entries = equipment_tables.take_tables(below + lines, plan, report, None, 'ML', 'ch8', regions)
+        self.assertEqual(report['errors'], [])
+        self.assertEqual([l['text'] for l in rest], ['10 LAMPS'])
+        notes = dict(((c, e['slug']), e) for c, e in entries)[('tables', 'lamp-table')]['content'][-1]
+        self.assertEqual(notes['items'], ['[1] Smokes indoors. Keep a window open.', '[2] Burns for an hour.'])
+
+    def test_text_under_a_panel_that_opens_no_note_fails_the_table(self):
+        lines = [dict(l, box='10.1') for l in lamp_table()[:9]]   # a panel's lines follow the page's
+        below = [line(300.0, [(60, 'The lamps above burn oil.')])]
+        regions = [{'id': '10.1', 'page': 10, 'kind': 'box', 'bbox': [50, 90, 560, 280]}]
+        plan = {'equipment_tables': [dict(PLAN['equipment_tables'][0], notes_below=True)]}
+        report = {'errors': [], 'questions': []}
+        rest, entries = equipment_tables.take_tables(below + lines, plan, report, None, 'ML', 'ch8', regions)
+        self.assertEqual(entries, [])
+        self.assertIn('opens no note', report['errors'][0])
+        self.assertEqual([l['text'] for l in rest], ['The lamps above burn oil.'])
+
     def test_a_title_the_page_does_not_have_is_an_error(self):
         _, entries, report = self.take(lamp_table(), {'equipment_tables': [{'title': 'Candle Table', 'page': 10, 'kind': 'lamp'}]})
         self.assertEqual(entries, {})

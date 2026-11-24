@@ -53,7 +53,8 @@ is set as that many like tables side by side, to be read one after another.
 `lead_lines` says how many lines after the title are text before the table ("This table
 summarizes ..."): they go into the entry as a paragraph before it. `after_lines` says how many of
 the panel's last lines are text after the table (a way to work out what it lists): they go in as
-a paragraph after it. `empty_cells` lists the cells, as [row, column] counted from 1, that the
+a paragraph after it, or, when they are numbered notes the rows cite ("[1] ..."), as a list
+keyed by number. `empty_cells` lists the cells, as [row, column] counted from 1, that the
 page prints blank ("No lamps are lit." filling a row whose last column is left empty); any other
 empty cell fails the table, and so does one listed that is not blank.
 
@@ -113,8 +114,9 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from entry_text import (SMALL_WORDS, blocks_from_lines, fix_case, is_table_header, mark_paragraphs,  # noqa: E402
-                        marked, plain, slugify, table_block, vocabulary, with_keyed_lists, with_text_tables)
+from entry_text import (SMALL_WORDS, blocks_from_lines, fix_case, is_table_header, join_lines,  # noqa: E402
+                        mark_paragraphs, marked, plain, slugify, table_block, vocabulary, with_keyed_lists,
+                        with_text_tables)
 from render_entry import render  # noqa: E402
 from equipment_tables import take_tables  # noqa: E402
 import creatures  # noqa: E402
@@ -217,7 +219,7 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None):
     vocab |= {w.lower() for w in plan.get('hyphenated_words', [])}  # or says keep their hyphen
     vocab.dictionary = frozenset(dictionary or ())    # English words, for what the book prints nowhere else
     # the equipment tables the plan names: entries of their own, out of the text
-    lines, table_entries = take_tables(lines, plan, report, vocab, source, chapter)
+    lines, table_entries = take_tables(lines, plan, report, vocab, source, chapter, layout.get('regions', []))
     if plan.get('indent', True):
         mark_paragraphs(lines)
     body = [l for l in lines if not l.get('box')]
@@ -594,7 +596,20 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None):
                 blocks.insert(at, b)
                 at += 1
             blocks.insert(at, block)
-            for j, b in enumerate(blocks_from_lines(after, report, target, vocab)):
+            if after and re.match(r'\[\d+\]\s', plain(after[0]['text'])):
+                # numbered notes the table's rows cite ("[1] ..."): a list, keyed by number
+                notes = []
+                for l in after:
+                    m = re.match(r'\[(\d+)\]\s*', plain(l['text']))
+                    if m:
+                        notes.append([m.group(1), [marked(l)]])
+                    else:
+                        notes[-1][1].append(marked(l))
+                after_blocks = [{'type': 'list', 'ordered': False, 'keys': [n for n, _ in notes],
+                                 'items': [join_lines(parts, report, target, vocab) for _, parts in notes]}]
+            else:
+                after_blocks = blocks_from_lines(after, report, target, vocab)
+            for j, b in enumerate(after_blocks):
                 blocks.insert(at + 1 + j, b)
             block['read_with'] = [side for side, j in (('before', at - 1), ('after', at + 1))
                                   if 0 <= j < len(blocks) and blocks[j]['type'] == 'paragraph']

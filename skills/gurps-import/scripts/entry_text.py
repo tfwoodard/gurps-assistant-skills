@@ -307,6 +307,11 @@ def mark_paragraphs(lines):
                              re.search(r'[;,]\**$', plain(before['text']).rstrip()))
         else:
             l['para'] = False
+        if prev is None and l['para'] and i and body[i - 1].get('box') == l.get('box') and runs_on(body[i - 1], l):
+            # a column's first line that carries on a sentence broken off at the foot of the last
+            # ("... the keeper should" / "trim the wick ..."), though it stands in from the line under it
+            # (the column's lines step round a picture)
+            l['para'] = False
         if prev is None and hang and hang[0] != group(l) and not starts_with_label(l) and \
                 INDENT[0] <= l['x0'] - edge[group(l)] <= INDENT[1]:
             # A hanging labelled line carried over a column or page turn ("Lamps 3 [6]; Oil" / "2
@@ -317,7 +322,8 @@ def mark_paragraphs(lines):
                     not SENTENCE_END.search(plain(last['text'])):
                 l['para'] = False
                 hang = (group(l), edge[group(l)], hang[2])
-        if hang and hang[0] == group(l) and l['x0'] > hang[1] + INDENT[0] - 1 and                 (not starts_with_label(l) or label_style(l) != hang[2]):
+        if hang and hang[0] == group(l) and l['x0'] > hang[1] + INDENT[0] - 1 and \
+                (not starts_with_label(l) or label_style(l) != hang[2]):
             # a line hanging under a flush labelled line, perhaps with a label of another style in
             # it ("Oil:" in italics within a bold-labelled item; a label of the item's own style
             # starts another item); but one after a sentence's end whose next line goes back to
@@ -887,16 +893,24 @@ def read_text_table(header, rows, empty=()):
     # that row's name, set over two lines with the cells on its last ("Rope ladder" / "(no
     # gloves) 2 feet ..."), when the second reads on from it (a small letter or a
     # bracket starts it, or the first breaks off at a hyphen or comma); else a cell is missing.
+    # A name may run over more lines than two, each reading on from the one before.
     def reads_on(first, second):
         return bool(re.match(r'[a-z(\[]', second[0][0])) or first[-1][0].endswith(('-', ','))
+
+    def name_only(r):
+        return bool(r[0]) and not any(r[1:])
 
     g2, r2, k = [], [], 0
     while k < len(grid):
         r = grid[k]
-        if r[0] and not any(r[1:]) and k + 1 < len(grid) and all(grid[k + 1]) and reads_on(r[0], grid[k + 1][0]):
-            g2.append([r[0] + grid[k + 1][0]] + [list(c) for c in grid[k + 1][1:]])
-            r2.append(dict(rows[k], text=rows[k]['text'] + ' ' + rows[k + 1]['text']))
-            k += 2
+        j = k
+        while j + 1 < len(grid) and name_only(grid[j]) and reads_on(grid[j][0], grid[j + 1][0]) and \
+                (name_only(grid[j + 1]) or all(grid[j + 1])):
+            j += 1
+        if j > k and all(grid[j]):
+            g2.append([[w for x in grid[k:j + 1] for w in x[0]]] + [list(c) for c in grid[j][1:]])
+            r2.append(dict(rows[k], text=' '.join(x['text'] for x in rows[k:j + 1])))
+            k = j + 1
         else:
             g2.append(r)
             r2.append(rows[k])

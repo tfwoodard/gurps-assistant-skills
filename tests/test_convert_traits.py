@@ -602,6 +602,15 @@ class ParagraphTest(unittest.TestCase):
             p.para('Then the bell rings.')
         self.assertEqual([m for _, m in self.marks(build)], [True, False, False, True])
 
+    def test_a_column_stepping_round_a_picture_carries_on_the_sentence_the_last_broke_off(self):
+        def build(p):
+            p.para('The keeper climbs the', 'stair and trims the')
+            p.at(column='right', y=80.0)
+            p.line('wick before', indent=14.0)       # stands in from the line under it, round a picture
+            p.line('dusk, and rests.', indent=6.0)
+            p.line('Then the bell rings.')
+        self.assertEqual([m for _, m in self.marks(build)], [True, False, False, False, False])
+
     def test_a_hanging_labelled_line_carries_on_over_a_column_turn_past_a_box(self):
         def labelled(p, label, rest, indent=0.0):
             l = p.line(f'{label}: {rest}', indent=indent)
@@ -728,7 +737,7 @@ class MixedListTest(unittest.TestCase):
         self.assertEqual([(b['type'], b.get('text') or b.get('title')) for b in owner['content']][-2:],
                          [('paragraph', 'Lamps the keepers use.'), ('table', 'Lamp Table')])
 
-    def panel(self, boxplan, second=False):
+    def panel(self, boxplan, second=False, notes=False):
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         from test_text_tables import line as text_line
         doc = self.doc()
@@ -740,6 +749,9 @@ class MixedListTest(unittest.TestCase):
                text_line(338.0, [(60, 'Small'), (110, '1 pint'), (200, '1')]),
                text_line(349.0, [(60, 'Great'), (110, '4 pints'), (200, '2')]),
                text_line(363.0, [(60, 'Or count a pint for each foot of tower.')])]
+        if notes:                         # numbered notes in place of the line of text
+            box[-1:] = [text_line(363.0, [(60, '[1] Lit at dusk and trimmed at')]), text_line(374.0, [(48, 'midnight.')]),
+                        text_line(385.0, [(60, '[2] Lit in fog.')])]
         for l in box[1:]:
             l.update(box='10.1', column='full')
         doc['lines'] += box
@@ -757,6 +769,12 @@ class MixedListTest(unittest.TestCase):
                          [('table', 'Lamp Table'), ('paragraph', 'Or count a pint for each foot of tower.')])
         self.assertEqual(owner['content'][-2]['rows'][0], ['None', 'No lamp is lit.', ''])
         self.assertEqual(report['tables'][0]['blank_as_printed'], [[1, 3]])
+
+    def test_numbered_notes_at_a_panels_foot_are_a_list_keyed_by_number(self):
+        owner, report = self.panel({'after_lines': 3, 'empty_cells': [[1, 3]]}, notes=True)
+        self.assertEqual(report['errors'], [])
+        self.assertEqual(owner['content'][-1], {'type': 'list', 'ordered': False, 'keys': ['1', '2'],
+                                                'items': ['[1] Lit at dusk and trimmed at midnight.', '[2] Lit in fog.']})
 
     def test_a_panels_table_goes_after_the_paragraph_the_plan_names(self):
         owner, report = self.panel({'after_lines': 1, 'empty_cells': [[1, 3]], 'after_text': 'Keepers differ'}, True)
