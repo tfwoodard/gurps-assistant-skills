@@ -319,7 +319,7 @@ def mark_paragraphs(lines):
                 hang = (group(l), edge[group(l)], hang[2])
         if hang and hang[0] == group(l) and l['x0'] > hang[1] + INDENT[0] - 1 and                 (not starts_with_label(l) or label_style(l) != hang[2]):
             # a line hanging under a flush labelled line, perhaps with a label of another style in
-            # it ("Time:" in italics within a bold-labelled item; a label of the item's own style
+            # it ("Oil:" in italics within a bold-labelled item; a label of the item's own style
             # starts another item); but one after a sentence's end whose next line goes back to
             # the margin, with no label, is a paragraph's first line after them
             l['para'] = bool(ended and nxt is not None and not starts_with_label(nxt) and
@@ -344,7 +344,7 @@ def label_style(l):
 
 def starts_with_label(l):
     """True when a line opens with a label in bold or italic ending in a colon ("Attributes:") or
-    a spaced dash ("IQ 2 –")."""
+    a spaced dash ("Rank 2 –")."""
     first = next((sp for sp in l.get('spans') or [] if sp['text'].strip()), None)
     if not first or not (first['bold'] or first['italic']):
         return False

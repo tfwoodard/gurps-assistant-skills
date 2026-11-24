@@ -55,7 +55,7 @@ def chapter():
     label(p, 'Traits', 'Night Vision 2; Sharp Teeth (Fishing;')       # a semicolon inside brackets
     p.line('Small, -10%); Wild Animal.', indent=12.0)
     label(p, 'Skills', 'Swimming-15.')
-    beast(p, 'Sea Otter', will='Will 10; Per 12; Speed 6, Dodge 9;')  # a comma for a semicolon
+    beast(p, 'Sea Otter', will='Will 10; Per 12; Speed 7, Dodge 10;')  # a comma for a semicolon
     label(p, 'Traits and Skills', 'As river otter.')
     p.para('Sea otters float on their', 'backs to eat.')                 # the creature's text, after its stats
     beast(p, 'Herons', size=13.9, about=('A tall wading bird.',))      # a creature headed like a group
@@ -100,8 +100,8 @@ class CreatureSectionTest(unittest.TestCase):
 
     def test_a_comma_between_two_characteristics_is_read_as_a_semicolon_and_reported(self):
         e = self.by['creatures/sea-otter']
-        self.assertEqual((e['fields']['attributes']['Speed'], e['fields']['attributes']['Dodge']), ('6', '9'))
-        self.assertEqual(self.report['stat_lines'], [{'entry': 'creatures/sea-otter', 'text': 'Speed 6, Dodge 9',
+        self.assertEqual((e['fields']['attributes']['Speed'], e['fields']['attributes']['Dodge']), ('7', '10'))
+        self.assertEqual(self.report['stat_lines'], [{'entry': 'creatures/sea-otter', 'text': 'Speed 7, Dodge 10',
                                                       'read': 'a comma between two characteristics, read as the '
                                                               'semicolon the others print'}])
         self.assertEqual(e['fields']['traits_and_skills'], 'As river otter.')

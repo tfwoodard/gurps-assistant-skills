@@ -232,7 +232,7 @@ a little off the line joins the line it touches."""
         for n, c in enumerate(kept):
             if c['text'].isspace():
                 # A space the next glyph is printed over, starting where it starts, takes no room
-                # on the page: a leftover in the text layer ("Depend" / " " / "ing", where a line
+                # on the page: a leftover in the text layer ("lantern" / " " / "light", where a line
                 # was broken once and set again), not a break between words.
                 # (The glyph over it may sort before it or after it.)
                 over = [k for k in kept[max(0, n - 3):n + 4] if not k['text'].isspace() and

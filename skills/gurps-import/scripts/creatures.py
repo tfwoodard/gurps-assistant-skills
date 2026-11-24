@@ -2,19 +2,19 @@
 
 A creature is a heading (its name), perhaps a description, then its stat block:
 
-    ST 11; DX 12; IQ 6; HT 12.
-    Will 10; Per 10; Speed 6; Dodge 9;
-        Move 7.
-    SM 0; 140 lbs.
-    Traits: Night Vision 2; Quadruped; ...
-    Skills: Brawling-13.
+    ST 4; DX 14; IQ 4; HT 12.
+    Will 10; Per 12; Speed 6.5; Dodge 9;
+        Move 5 (Water Move 8).
+    SM -2; 20 lbs.
+    Traits: Night Vision 2; Wild Animal; ...
+    Skills: Swimming-15.
 
 The stat lines (the characteristic names in bold) start at the line opening "ST" and a number,
 and run to the first labelled line. Their characteristics are read in printed order, split at
-the semicolons and full stops between them (never inside brackets): `{"ST": "11", ...,
-"Move": "7 (Water Move 3)", "SM": "+1 (2 hexes)", "Weight": "140 lbs."}`, each value as printed.
+the semicolons and full stops between them (never inside brackets): `{"ST": "4", ...,
+"Move": "5 (Water Move 8)", "SM": "-2", "Weight": "20 lbs."}`, each value as printed.
 The weight is the one item printed without a name. A comma where the others print a semicolon
-("Speed 6, Dodge 9") is read as one and reported; anything else is an error.
+("Speed 7, Dodge 10") is read as one and reported; anything else is an error.
 
 The labelled lines ("Traits:", "Skills:", "Traits and Skills:", "Cost:", the label in bold
 italic) each run on over the lines hanging under them, and are kept as printed, in order. A
@@ -34,7 +34,7 @@ COMMA = re.compile(r',\s+(?=(?:' + NAME + r')\s)')
 
 
 def is_stat_start(l):
-    """True for the line that opens a stat block ("ST 11; DX 12; ...")."""
+    """True for the line that opens a stat block ("ST 4; DX 14; ...")."""
     return bool(STAT_START.match(plain(l['text'])))
 
 

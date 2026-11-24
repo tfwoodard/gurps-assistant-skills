@@ -1,5 +1,5 @@
 """pdf_layout.py: a space in the text layer that the next glyph is printed over takes no room on
-the page and doesn't part two words ("Depend" / " " / "ing", left where a line was broken once and
+the page and doesn't part two words ("lantern" / " " / "light", left where a line was broken once and
 set again); a space that takes its room does. The page is invented and drawn here.
 
 Run: python -m unittest discover tests

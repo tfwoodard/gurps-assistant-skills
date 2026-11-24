@@ -81,12 +81,12 @@ can also say:
   * `"line": "points"` for a template's point total, read into `points`.
 
 A section can be a list of creatures instead: `"creatures": {"kind": "animal", "name_size": 10.9,
-"group_size": 13.9}`. A heading at either size whose text holds a stat line ("ST 11; DX 12; ...",
+"group_size": 13.9}`. A heading at either size whose text holds a stat line ("ST 4; DX 14; ...",
 read by creatures.py) is a `creatures` entry: its description, then its stat block as a `profile`
 (characteristics in printed order, then the labelled lines as printed), its `fields` the
 characteristics as `attributes` and each labelled line under its label (`traits`, `skills`,
-`cost`). A heading at the group size with no stat line is a group (the book's "Bears", over
-three kinds of bear): an entry of its own, which each creature under it, up to the next heading
+`cost`). A heading at the group size with no stat line is a group (an "Otters" over
+two kinds of otter): an entry of its own, which each creature under it, up to the next heading
 at the group size, `adds-to`. The report's `creature_groups` lists each group's members, and
 `stat_lines` any part of a stat line read otherwise than as printed.
 
@@ -250,7 +250,7 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None):
     def creature_section(c, title, title_printed, head, inner, parent, level, size):
         """A section that is a list of creatures. A heading at the creatures' name size (or the
         groups') whose text holds a stat line is a creature; a heading at the group size with no
-        stat line is a group (Bears), an entry of its own that the creatures under it add to."""
+        stat line is a group ("Otters"), an entry of its own that the creatures under it add to."""
         sizes = [c['name_size']] + ([c['group_size']] if c.get('group_size') else [])
         starts = [j for j, (k, run) in enumerate(inner)
                   if k == 'heading' and any(near(run[0]['size'], s) for s in sizes)]
@@ -281,7 +281,7 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None):
                 report.setdefault('creature_groups', []).append({'group': name, 'page': first['page'], 'members': []})
                 continue
             if at_group_size:
-                group = None                      # a creature headed like a group stands alone (Camels)
+                group = None                      # a creature headed like a group stands alone ("Herons")
             where = f'creatures/{slugify(name)}'
             profile, fields, after = creatures.stat_block(rest[s:], report, where, vocab)
             if profile is None:
