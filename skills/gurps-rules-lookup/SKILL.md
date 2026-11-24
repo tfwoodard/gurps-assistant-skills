@@ -13,7 +13,7 @@ Read `references/library-layout.md` for where data lives and how to cite it.
    rules from `library.json` and `campaign.json`; campaign rules win where they
    conflict.
 2. Pick the likely categories (rules, advantages, disadvantages, skills,
-   spells, modifiers, equipment, tables…) and find entries as layout §8
+   spells, modifiers, equipment, creatures, tables…) and find entries as layout §8
    describes ("Finding entries for a campaign"): library, campaign, and, for
    the GM only, `gm/` library data, filtered by the sources in play. Match on
    `name` and `aliases`, case-insensitively, then open the best 1–5 entry

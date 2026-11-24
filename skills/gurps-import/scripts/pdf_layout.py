@@ -229,8 +229,17 @@ a little off the line joins the line it touches."""
                    abs(k['top'] - c['top']) < 1 for k in kept[-3:]):
                 continue
             kept.append(c)
-        for c in kept:
+        for n, c in enumerate(kept):
             if c['text'].isspace():
+                # A space the next glyph is printed over, starting where it starts, takes no room
+                # on the page: a leftover in the text layer ("lantern" / " " / "light", where a line
+                # was broken once and set again), not a break between words.
+                # (The glyph over it may sort before it or after it.)
+                over = [k for k in kept[max(0, n - 3):n + 4] if not k['text'].isspace() and
+                        abs(k['x0'] - c['x0']) < 0.3 * max(c['x1'] - c['x0'], 0.5)]
+                before = [k for k in kept[:n] if not k['text'].isspace() and all(k is not o for o in over)]
+                if cur and over and before and abs(over[0]['x0'] - before[-1]['x1']) < 0.1 * c['size']:
+                    continue
                 if cur:
                     groups.append((b, cur))
                 cur = []

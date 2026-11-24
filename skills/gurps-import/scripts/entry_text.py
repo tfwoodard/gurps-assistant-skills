@@ -283,7 +283,7 @@ def mark_paragraphs(lines):
 
     body = [l for l in lines if not l.get('heading')]
     pos = {id(l): i for i, l in enumerate(lines)}
-    hang = None                       # (group, x0) of a labelled line set flush, its later lines hanging
+    hang = None                       # (group, x0, label style) of a labelled line set flush, its later lines hanging
     edge = {}                         # each column's left edge: the least x0 of its lines
     for l in body:
         edge[group(l)] = min(edge.get(group(l), l['x0']), l['x0'])
@@ -316,14 +316,19 @@ def mark_paragraphs(lines):
             if last is not None and group(last) == hang[0] and last['x0'] > hang[1] + INDENT[0] - 1 and \
                     not SENTENCE_END.search(plain(last['text'])):
                 l['para'] = False
-                hang = (group(l), edge[group(l)])
-        if hang and hang[0] == group(l) and l['x0'] > hang[1] + INDENT[0] - 1 and not starts_with_label(l):
-            l['para'] = False                      # a line hanging under a flush labelled line
+                hang = (group(l), edge[group(l)], hang[2])
+        if hang and hang[0] == group(l) and l['x0'] > hang[1] + INDENT[0] - 1 and                 (not starts_with_label(l) or label_style(l) != hang[2]):
+            # a line hanging under a flush labelled line, perhaps with a label of another style in
+            # it ("Oil:" in italics within a bold-labelled item; a label of the item's own style
+            # starts another item); but one after a sentence's end whose next line goes back to
+            # the margin, with no label, is a paragraph's first line after them
+            l['para'] = bool(ended and nxt is not None and not starts_with_label(nxt) and
+                             INDENT[0] <= l['x0'] - nxt['x0'] <= INDENT[1])
         elif not l['para'] and ended and starts_with_label(l):
             # a labelled line set flush, its own lines hanging under it ("Attributes: ST 10 [0];")
             l['para'] = True
         if starts_with_label(l) and l['para'] and abs(l['x0'] - edge[group(l)]) < 1.5:
-            hang = (group(l), l['x0'])
+            hang = (group(l), l['x0'], label_style(l))
         elif hang and l.get('box') != hang[0][2]:
             pass                                   # a box's lines between: the hang waits for the text
         elif l['para'] or not hang or hang[0] != group(l) or l['x0'] <= hang[1] + 1:
@@ -331,13 +336,20 @@ def mark_paragraphs(lines):
     return lines
 
 
+def label_style(l):
+    """(bold, italic) of a line's first words."""
+    first = next((sp for sp in l.get('spans') or [] if sp['text'].strip()), None)
+    return (first['bold'], first['italic']) if first else None
+
+
 def starts_with_label(l):
-    """True when a line opens with a label in bold or italic ending in a colon ("Attributes:")."""
+    """True when a line opens with a label in bold or italic ending in a colon ("Attributes:") or
+    a spaced dash ("Rank 2 –")."""
     first = next((sp for sp in l.get('spans') or [] if sp['text'].strip()), None)
     if not first or not (first['bold'] or first['italic']):
         return False
     lead = first['text'].strip()
-    if not re.match(r'^[^\W\d_][^:]{0,40}:$', lead):
+    if not re.match(r'^(?:[^\W\d_][^:]{0,40}:|[\w+−-][^:]{0,40}\s[–—])$', lead):
         return False
     rest = [sp for sp in l['spans'][l['spans'].index(first) + 1:] if sp['text'].strip()]
     # the label alone on its line, or followed by text in another style

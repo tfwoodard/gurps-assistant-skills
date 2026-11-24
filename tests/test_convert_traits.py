@@ -621,6 +621,32 @@ class ParagraphTest(unittest.TestCase):
             labelled(p, 'Advantages', 'Lamp Sense [5].')
         self.assertEqual([m for _, m in self.marks(build)], [True, True, False, False, False, False, False, True])
 
+    @staticmethod
+    def styled(p, spans, indent=0.0):
+        """A line of (text, bold, italic) runs."""
+        l = p.line(' '.join(t for t, _, _ in spans), indent=indent)
+        l['spans'] = [{'text': t, 'size': 9.5, 'bold': b, 'italic': i} for t, b, i in spans]
+        return l
+
+    def test_a_ladder_of_dash_labels_with_labels_of_another_style_inside_its_items(self):
+        def build(p):
+            p.para('How the lamps are rated:')
+            self.styled(p, [('2 –', True, False), ('Dim.', False, True), ('Lit at dusk', False, False)])
+            p.line('and put out at dawn.', indent=12.0)
+            self.styled(p, [('Oil:', False, True), ('A pint a', False, False)], indent=12.0)   # inside the item
+            p.line('night.', indent=12.0)
+            self.styled(p, [('-1 –', True, False), ('Out.', False, True), ('Not lit.', False, False)])
+            p.para('Keepers mark the rating', 'on the door.')                 # a paragraph after the ladder
+        self.assertEqual([m for _, m in self.marks(build)], [True, True, False, False, False, True, True, False])
+
+    def test_an_indented_label_of_the_items_own_style_starts_another_item(self):
+        def build(p):
+            self.styled(p, [('Default:', False, True), ('Rowing-2.', False, False)])
+            self.styled(p, [('Punt:', False, True), ('Any flat boat.', False, False)], indent=12.0)
+            self.styled(p, [('Skiff:', False, True), ('Any small boat', False, False)], indent=12.0)
+            p.line('with oars.')
+        self.assertEqual([m for _, m in self.marks(build)], [True, True, True, False])
+
 
 class TwoSidebarsInOneFrameTest(unittest.TestCase):
     def test_a_heading_as_large_as_the_boxs_title_starts_another_entry(self):
@@ -702,10 +728,12 @@ class MixedListTest(unittest.TestCase):
         self.assertEqual([(b['type'], b.get('text') or b.get('title')) for b in owner['content']][-2:],
                          [('paragraph', 'Lamps the keepers use.'), ('table', 'Lamp Table')])
 
-    def panel(self, boxplan):
+    def panel(self, boxplan, second=False):
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         from test_text_tables import line as text_line
         doc = self.doc()
+        if second:                        # a second paragraph in the entry, after the one citing the table
+            doc['lines'].insert(2, mini_line('Their lamps are of two kinds.', 97.0))
         box = [mini_line('Lamp Table', 300.0, 14.0, box='10.1'),
                text_line(316.0, [(60, 'Lamp'), (110, 'Oil'), (200, 'Keepers')], True),
                text_line(327.0, [(60, 'None'), (110, 'No lamp is lit.')]),
@@ -729,6 +757,16 @@ class MixedListTest(unittest.TestCase):
                          [('table', 'Lamp Table'), ('paragraph', 'Or count a pint for each foot of tower.')])
         self.assertEqual(owner['content'][-2]['rows'][0], ['None', 'No lamp is lit.', ''])
         self.assertEqual(report['tables'][0]['blank_as_printed'], [[1, 3]])
+
+    def test_a_panels_table_goes_after_the_paragraph_the_plan_names(self):
+        owner, report = self.panel({'after_lines': 1, 'empty_cells': [[1, 3]], 'after_text': 'Keepers differ'}, True)
+        self.assertEqual(report['errors'], [])
+        self.assertEqual([(b['type'], (b.get('text') or b.get('title'))[:14]) for b in owner['content']],
+                         [('paragraph', 'Keepers differ'), ('table', 'Lamp Table'), ('paragraph', 'Or count a pin'),
+                          ('paragraph', 'Their lamps ar')])
+        self.assertEqual(owner['content'][1]['read_with'], ['before', 'after'])
+        _, report = self.panel({'after_lines': 1, 'empty_cells': [[1, 3]], 'after_text': 'No such words'})
+        self.assertTrue(any("0 paragraphs opening 'No such words'" in e for e in report['errors']), report['errors'])
 
     def test_a_blank_not_named_fails_and_so_does_one_named_that_is_not_blank(self):
         _, report = self.panel({'after_lines': 1})
