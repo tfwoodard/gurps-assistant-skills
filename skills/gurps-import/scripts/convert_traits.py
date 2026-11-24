@@ -46,8 +46,8 @@ trait twice in a chapter, the second gets a `slug` and a `relation` there instea
 single lines that are not text of the chapter.
 
 A box that is a table on a tinted panel of its own (the layout marks it `bands`) belongs to an
-entry: `into` names it, and `under` a heading in it to put the table straight after (else it goes
-at the entry's end); `title_lines` says how many of its first lines are its title, and `fold` that it
+entry: `into` names it, and `under` a heading in it to put the table straight after, or `after_text`
+the opening words of the paragraph to put it after (else it goes at the entry's end); `title_lines` says how many of its first lines are its title, and `fold` that it
 is set as that many like tables side by side, to be read one after another.
 
 `lead_lines` says how many lines after the title are text before the table ("This table
@@ -80,6 +80,16 @@ can also say:
   * `"name_size"` for the size its traits' names are set in, when it is not the chapter's;
   * `"line": "points"` for a template's point total, read into `points`.
 
+A section can be a list of creatures instead: `"creatures": {"kind": "animal", "name_size": 10.9,
+"group_size": 13.9}`. A heading at either size whose text holds a stat line ("ST 11; DX 12; ...",
+read by creatures.py) is a `creatures` entry: its description, then its stat block as a `profile`
+(characteristics in printed order, then the labelled lines as printed), its `fields` the
+characteristics as `attributes` and each labelled line under its label (`traits`, `skills`,
+`cost`). A heading at the group size with no stat line is a group (the book's "Bears", over
+three kinds of bear): an entry of its own, which each creature under it, up to the next heading
+at the group size, `adds-to`. The report's `creature_groups` lists each group's members, and
+`stat_lines` any part of a stat line read otherwise than as printed.
+
 `trait_ends` lists headings ({page, text}) that end the trait before them: what follows, up to
 the next trait, goes to the section's own entry ("ESP Abilities" after "ESP Talent").
 `split_labelled` ({ref: {fields, except}}) makes each paragraph of that entry that opens with a
@@ -107,6 +117,7 @@ from entry_text import (SMALL_WORDS, blocks_from_lines, fix_case, is_table_heade
                         marked, plain, slugify, table_block, vocabulary, with_keyed_lists, with_text_tables)
 from render_entry import render  # noqa: E402
 from equipment_tables import take_tables  # noqa: E402
+import creatures  # noqa: E402
 
 # fields that hold words printed on the page
 PRINTED_FIELDS = ('cost', 'types', 'see', 'attribute', 'difficulty', 'printed_name', 'class', 'resisted', 'points')
@@ -236,6 +247,54 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None):
         entries.append((category, entry))
         return entry
 
+    def creature_section(c, title, title_printed, head, inner, parent, level, size):
+        """A section that is a list of creatures. A heading at the creatures' name size (or the
+        groups') whose text holds a stat line is a creature; a heading at the group size with no
+        stat line is a group (Bears), an entry of its own that the creatures under it add to."""
+        sizes = [c['name_size']] + ([c['group_size']] if c.get('group_size') else [])
+        starts = [j for j, (k, run) in enumerate(inner)
+                  if k == 'heading' and any(near(run[0]['size'], s) for s in sizes)]
+        intro = [l for _, run in inner[:starts[0] if starts else len(inner)] for l in run]
+        if intro:
+            add('rules', title, head[0], parent, dict(plan.get('rules_fields', {})), intro, level, size)
+        else:
+            report['left_out'].append({'page': head[0]['page'], 'text': title_printed,
+                                       'why': 'a heading with nothing under it but other entries'})
+        if not starts:
+            report['errors'].append(f'p{head[0]["page"]}: creatures section {title!r} has no creature headings '
+                                    f'at {sizes}')
+        group = None                              # (slug, name) of the group open
+        for m, j in enumerate(starts):
+            name_run = inner[j][1]
+            name, first = fix_case(heading_text(name_run)), name_run[0]
+            rest = [l for _, run in inner[j + 1:starts[m + 1] if m + 1 < len(starts) else len(inner)] for l in run]
+            at_group_size = bool(c.get('group_size')) and near(first['size'], c['group_size'])
+            s = next((k for k, l in enumerate(rest) if creatures.is_stat_start(l)), None)
+            if s is None:
+                if not at_group_size:
+                    report['errors'].append(f'p{first["page"]}: {name!r} has no stat line ("ST ...") in its text; '
+                                            f'only a heading at the group size can be a group')
+                    continue
+                add('creatures', name, first, title, {'kind': c['kind']}, rest, first.get('heading', level + 1),
+                    first['size'])
+                group = (slugify(name), name)
+                report.setdefault('creature_groups', []).append({'group': name, 'page': first['page'], 'members': []})
+                continue
+            if at_group_size:
+                group = None                      # a creature headed like a group stands alone (Camels)
+            where = f'creatures/{slugify(name)}'
+            profile, fields, after = creatures.stat_block(rest[s:], report, where, vocab)
+            if profile is None:
+                continue
+            extra = {'relations': [{'role': 'adds-to', 'to': f'creatures/{group[0]}'}]} if group else {}
+            entry = add('creatures', name, first, group[1] if group else title, dict(fields, kind=c['kind']),
+                        rest[:s], first.get('heading', level + 1), first['size'], extra)
+            entry['fields'] = dict({'kind': c['kind']}, **fields)
+            entry['content'].append(dict(profile, name=name))
+            entry['content'] += blocks_from_lines(after, report, where, vocab)
+            if group:
+                report['creature_groups'][-1]['members'].append(name)
+
     # --- sections of the page text -----------------------------------------------------------
     runs = group_headings(body, lambda l: bool(l.get('heading')))
     section_at = [i for i, (k, run) in enumerate(runs) if k == 'heading' and run[0]['size'] > name_size + 0.3]
@@ -274,6 +333,9 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None):
                                            'why': 'a heading with nothing under it but other entries'})
             continue
         used_sections.add((spec['page'], spec['heading'].lower()))
+        if spec.get('creatures'):
+            creature_section(spec['creatures'], title, title_printed, head, inner, parent, level, size)
+            continue
         t = spec['traits']
         # split the section at its trait names
         starts = []
@@ -519,6 +581,15 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None):
                     report['errors'].append(f'box {bid}: {target} has no heading {bp["under"]!r} to put the table under')
                     continue
                 at = heads[0] + 1
+            if bp.get('after_text'):
+                # the paragraph that cites the table ("... on the table on p. 99."), by its opening words
+                paras = [i for i, b in enumerate(blocks) if b['type'] == 'paragraph' and
+                         plain(b['text']).startswith(bp['after_text'])]
+                if len(paras) != 1:
+                    report['errors'].append(f'box {bid}: {target} has {len(paras)} paragraphs opening '
+                                            f'{bp["after_text"]!r} to put the table after; it needs one')
+                    continue
+                at = paras[0] + 1
             for b in blocks_from_lines(lead, report, target, vocab):
                 blocks.insert(at, b)
                 at += 1
