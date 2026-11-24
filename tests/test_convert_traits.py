@@ -602,6 +602,25 @@ class ParagraphTest(unittest.TestCase):
             p.para('Then the bell rings.')
         self.assertEqual([m for _, m in self.marks(build)], [True, False, False, True])
 
+    def test_a_hanging_labelled_line_carries_on_over_a_column_turn_past_a_box(self):
+        def labelled(p, label, rest, indent=0.0):
+            l = p.line(f'{label}: {rest}', indent=indent)
+            l['spans'] = [{'text': f'{label}:', 'size': 9.5, 'bold': True, 'italic': True},
+                          {'text': f' {rest}', 'size': 9.5, 'bold': False, 'italic': False}]
+
+        def build(p):
+            p.line('A keeper of the marsh lamps.', indent=12.0)
+            labelled(p, 'Attributes', 'ST 10 [0]; DX 11')
+            p.line('[20]; IQ 10 [0]; HT', indent=12.0)
+            p.line('11 [10]; Will', indent=12.0)                # breaks off mid-list at the column's foot
+            p.at(column='left', y=300.0, box='10.1')
+            p.line('A box set at the foot of the page.')
+            p.line('Its own lines, in reading order here.')
+            p.at(column='right', y=80.0)
+            p.line('10 [0]; Per 10 [0].', indent=12.0)          # the hanging line, carried over
+            labelled(p, 'Advantages', 'Lamp Sense [5].')
+        self.assertEqual([m for _, m in self.marks(build)], [True, True, False, False, False, False, False, True])
+
 
 class TwoSidebarsInOneFrameTest(unittest.TestCase):
     def test_a_heading_as_large_as_the_boxs_title_starts_another_entry(self):

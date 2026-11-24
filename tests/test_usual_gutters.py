@@ -38,6 +38,40 @@ def draw_page(path):
     c.save()
 
 
+def draw_pages(path):
+    """Six pages: the first three hide one of their three columns under a long opening, as
+    draw_page() does; the last three show all three. (The hiding pages come first: a tie is not
+    settled by which count was seen first.)"""
+    c = canvas.Canvas(path, pagesize=A4)
+    w, h = A4
+    for n in range(6):
+        c.setFont('Helvetica', 9)
+        if n < 3:
+            for k in range(14):
+                c.drawString(50, h - 80 - 11 * k, 'The keepers of the marsh lamps tend them all night long, every night.')
+        for k in range(20):
+            c.drawString(COLS[0], h - 260 - 11 * k, 'Left column words here.')
+            c.drawString(COLS[1], h - 260 - 11 * k, 'Middle column words.')
+            c.drawString(COLS[2], h - 300 - 11 * k, 'Right column words.')
+        c.showPage()
+    c.save()
+
+
+@unittest.skipUnless(HAVE_LIBS, 'reportlab is needed to draw the fixture PDF')
+class UsualGuttersTieTest(unittest.TestCase):
+    def test_as_many_pages_hiding_a_gutter_as_showing_it_are_read_with_it(self):
+        with tempfile.TemporaryDirectory() as d:
+            pdf, out = os.path.join(d, 'pages.pdf'), os.path.join(d, 'layout.json')
+            draw_pages(pdf)
+            r = subprocess.run([sys.executable, os.path.join(SCRIPTS, 'pdf_layout.py'), pdf, '--pages', '1-6',
+                                '--out', out], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            with open(out, encoding='utf-8') as f:
+                doc = json.load(f)
+        self.assertEqual([n['page'] for n in doc['gutter_notes']], [1, 2, 3])
+        self.assertEqual({len(g) for g in doc['gutters'].values()}, {2})
+
+
 @unittest.skipUnless(HAVE_LIBS, 'reportlab is needed to draw the fixture PDF')
 class UsualGuttersTest(unittest.TestCase):
     def layout(self, *extra):
