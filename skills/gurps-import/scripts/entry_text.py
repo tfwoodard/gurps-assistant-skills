@@ -1092,16 +1092,20 @@ def with_text_tables(lines, report, where):
 
 # --- lists keyed by a roll or a number ---------------------------------------------------------
 
-KEY = re.compile(r'^\s*(?P<key>\d+(?:\s*[-–]\s*\d+|(?:\s*,\s*\d+)+)?\+?)\s+[–—-]\s+\S')   # "3", "5-6", "14, 15", "40+"
+# "3", "5-6", "14, 15", "40+", "18 or more"; the dash after it may stand against it ("11– ...")
+KEY = re.compile(r'^\s*(?P<key>\d+(?:\s*[-–]\s*\d+|(?:\s*,\s*\d+)+)?\+?(?:\s+or\s+(?:more|less))?)'
+                 r'(?:\s+[–—-]|[–—])\s+\S')
+FOOTNOTE_MARK = re.compile(r'^\s*[*†‡]+\s+\S')
 
 
 def with_keyed_lists(lines, report, where, vocab=None):
     """Lines -> the same lines with each keyed list as one line carrying a list block.
 
     A keyed list is three or more items, each starting with a number or a range of numbers and a
-    dash ("3 – Spell fails entirely.", "5-6 – Spell is cast ..."), at one left edge, their
-    following lines set in further (a hanging indent), with nothing else between them. It is the
-    way a book prints the results of a roll as running text. Each item keeps its words as
+    dash ("3 – The lamp goes out.", "5-6 – It smokes ...", "18 or more – ..."), at one left edge,
+    their following lines set in further (a hanging indent), with nothing else between them. It is
+    the way a book prints the results of a roll as running text. A footnote under it, opening with
+    its mark ("* ..."), ends it, though set in like an item's later lines. Each item keeps its words as
     printed; the list is noted in the report's `keyed_lists`."""
     def where_(l):
         return (l['page'], l['column'], l.get('box'))
@@ -1127,8 +1131,12 @@ def with_keyed_lists(lines, report, where, vocab=None):
             run = [lines[j]]
             j += 1
             # (an item's later lines: set in further, or running on as the paragraph reader says,
-            # into the next column or page too, where the item carries over the turn)
-            while j < len(lines) and not lines[j].get('heading') and not lines[j].get('block') and                     not item_start(lines[j], edges) and lines[j].get('box') == l.get('box') and                     ((where_(lines[j]) == where_(run[0]) and lines[j]['x0'] > edge + 3) or
+            # into the next column or page too, where the item carries over the turn; a footnote
+            # under the list, opening with its mark, "* ...", "† ...", is no item's)
+            while j < len(lines) and not lines[j].get('heading') and not lines[j].get('block') and \
+                    not item_start(lines[j], edges) and lines[j].get('box') == l.get('box') and \
+                    not FOOTNOTE_MARK.match(lines[j]['text']) and \
+                    ((where_(lines[j]) == where_(run[0]) and lines[j]['x0'] > edge + 3) or
                      ('para' in lines[j] and not lines[j]['para'])):
                 run.append(lines[j])
                 j += 1

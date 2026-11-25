@@ -181,6 +181,25 @@ class ConvertTest(unittest.TestCase):
                                                         'to': 'wherever', 'why': 'a half is not a word by itself'}])
         self.assertEqual(self.by['advantages/tide-sense']['content'][0]['text'], 'You feel the tide turn, wherever you are.')
 
+    def test_an_opening_set_large_is_the_intros_first_paragraph(self):
+        p = Page()
+        p.line('The marsh is wide, and', size=15.8, heading=5)                  # the chapter's opening, set large
+        p.line('its lamps are few.', size=15.8, heading=5, gap=18.0)
+        p.para('Keepers walk it by night.')
+        p.line('MARSH GIFTS', size=20.0, heading=2, bold=True)
+        p.para('Every keeper has one.')
+        plan = {'source': 'ML', 'chapter': 'ch2', 'name_size': 14.0, 'cost_size': 11.0, 'icons': [],
+                'intro': {'name': 'The Marsh', 'standfirst': 2}}
+        entries, report = convert_traits.convert_chapter({'lines': p.lines, 'regions': []}, plan)
+        self.assertEqual(report['errors'], [])
+        by = {e['slug']: e for c, e in entries}
+        self.assertEqual(sorted(by), ['marsh-gifts', 'the-marsh'])
+        self.assertEqual([b['text'] for b in by['the-marsh']['content']],
+                         ['The marsh is wide, and its lamps are few.', 'Keepers walk it by night.'])
+        plan['intro']['standfirst'] = 3                                       # one line too many
+        _, report = convert_traits.convert_chapter({'lines': p.lines, 'regions': []}, plan)
+        self.assertIn('plan intro standfirst 3', report['errors'][0])
+
     def test_the_plans_whole_words_and_the_books_word_list_settle_broken_words(self):
         p = Page()
         p.line('GIFT LIST', size=20.0, heading=2, bold=True)

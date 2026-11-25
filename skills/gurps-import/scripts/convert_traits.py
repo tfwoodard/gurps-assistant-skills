@@ -37,7 +37,9 @@ The plan (kept in Drive beside the source, never in the repo):
 `whole_words` lists words broken at a line's end that are one word, where the converter kept the
 hyphen for want of evidence (the report's `hyphens_kept` gives each such case and why);
 `hyphenated_words` lists the ones it joined that keep their hyphen ("second-hand").
-`intro` names the entry for text printed before the chapter's first heading. `rename` gives a
+`intro` names the entry for text printed before the chapter's first heading; its `standfirst` says
+how many of the chapter's first lines are an opening set large, which reads as a heading but is
+the intro's first paragraph. `rename` gives a
 trait another name than the one printed, where two different things in one category share one
 (layout §4); the printed name stays in the entry's `fields.printed_name`. Where the book prints one
 trait twice in a chapter, the second gets a `slug` and a `relation` there instead of a new name:
@@ -208,6 +210,18 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None, skill
         for l in hit:
             report['left_out'].append({'page': l['page'], 'text': l['text'], 'why': spec['why']})
         lines = [l for l in lines if not any(l is h for h in hit)]
+    standfirst = plan.get('intro', {}).get('standfirst', 0)
+    if standfirst:
+        # an opening set large, over the chapter's text: the intro's first paragraph, no heading
+        opening = [l for l in lines if not l.get('box')][:standfirst]
+        if len(opening) < standfirst or not all(l.get('heading') for l in opening) or \
+                len({l['size'] for l in opening}) != 1:
+            report['errors'].append(f'plan intro standfirst {standfirst}: the chapter\'s first {standfirst} lines are '
+                                    f'not one run of large lines: {[l["text"][:30] for l in opening]}')
+        else:
+            for l in opening:
+                l.pop('heading')
+            report['standfirst'] = ' '.join(l['text'] for l in opening)
     renames = {(r['page'], r['name'], r.get('section', '').lower()): r for r in plan.get('rename', [])}
     ended = set()                             # trait_ends headings found
     renamed = set()

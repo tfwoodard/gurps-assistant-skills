@@ -38,6 +38,12 @@ class RenderEntryTest(unittest.TestCase):
         self.assertIn('| 01–50 | Whale |\n| ***Cheap Oils*** |  |\n| 51–00 | Tallow |', md)
         self.assertIn('> **Smoke**\n>\n> It rises.', md)
 
+    def test_a_paragraph_opening_with_a_footnote_mark_is_no_bullet(self):
+        md = render({'slug': 'wick-care', 'name': 'Wick Care', 'content': [
+            {'type': 'paragraph', 'text': 'Trim the wick.*'},
+            {'type': 'paragraph', 'text': '* Twice in a fog.'}]})
+        self.assertIn('Trim the wick.*\n\n\\* Twice in a fog.', md)
+
     def test_unknown_block_is_refused(self):
         with self.assertRaises(ValueError):
             render({'slug': 'x', 'name': 'X', 'content': [{'type': 'stat_block'}]})
