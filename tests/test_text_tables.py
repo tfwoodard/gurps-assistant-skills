@@ -77,6 +77,18 @@ class KeyedListKeysAndTurnsTest(unittest.TestCase):
         self.assertEqual(out[0]['block']['keys'], ['3', '4, 5', '6'])
         self.assertEqual(out[0]['block']['items'][1], '4, 5 – The lamp gutters and smokes.')
 
+    def test_keys_in_words_or_set_against_the_dash_and_a_footnote_under_the_list(self):
+        lines = [line(201.0, [(60, '2 or less – The lamp goes out.')]),
+                 line(212.0, [(60, '3– The lamp gutters and')]),
+                 line(223.0, [(72, 'smokes.*')]),
+                 line(234.0, [(60, '4 or more – Nothing happens.')]),
+                 line(245.0, [(72, '* Unless the wind is up.')])]        # set in, as the items' later lines are
+        report = {'errors': [], 'questions': []}
+        out = entry_text.with_keyed_lists(lines, report, 'rules/lamps')
+        self.assertEqual(out[0]['block']['keys'], ['2 or less', '3', '4 or more'])
+        self.assertEqual(out[0]['block']['items'][1], '3– The lamp gutters and smokes.*')
+        self.assertEqual([l['text'] for l in out[1:]], ['* Unless the wind is up.'])
+
 
 class KeyedListAcrossColumnsTest(unittest.TestCase):
     def test_a_keyed_list_set_as_paragraphs_carries_on_into_the_next_column(self):

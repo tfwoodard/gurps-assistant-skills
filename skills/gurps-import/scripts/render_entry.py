@@ -8,6 +8,7 @@ can call render() themselves: it is a pure function, with no I/O.
     render_entry.py ENTRY.json [...]    print each entry's Markdown
 """
 import json
+import re
 import sys
 
 FRONT = ('slug', 'name', 'source', 'chapter', 'section', 'page', 'kind', 'audience', 'relations', 'aliases')
@@ -95,7 +96,8 @@ def md_blocks(blocks, base=1, title=None):
         if t == 'heading':
             out += [f'{"#" * min(max(b["level"] - base + 1, 2), 6)} {b["text"]}', '']
         elif t == 'paragraph':
-            out += [b['text'], '']
+            # a paragraph opening with a mark Markdown reads as a bullet (a footnote's "* ") keeps it
+            out += [('\\' if re.match(r'[*+-]\s', b['text']) else '') + b['text'], '']
         elif t == 'list':
             out += md_list(b['items'], b['ordered']) + ['']
         elif t == 'table':
