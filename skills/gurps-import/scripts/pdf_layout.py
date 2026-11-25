@@ -63,7 +63,8 @@ plain text); its lines carry `table` too. An illustration cut out with a soft ma
 (mostly see-through) is not a panel, even where its rectangle runs over text;
 nor is a rectangle the page's lines run across (a word over its edge, or a line
 carrying on into it, on a quarter of its rows). A box's own lines are read in
-one or two columns, never three: a table's columns aren't text columns. A box holding
+one or two columns, never three: a table's columns aren't text columns. A table set inset
+beside a one-column box's text is read after the paragraph it sits beside (move_insets). A box holding
 several ruled tables, each under its own larger title, is read as one region per table,
 numbered "<box id>.<n>" (216.1.1, 216.1.2).
 `image_notes` lists each one set aside, and any mask that couldn't be read.
@@ -816,6 +817,50 @@ def outermost(boxes):
                                         o[3] >= b[3] for o in boxes)]
 
 
+def move_insets(lines, box):
+    """A one-column box's lines (in order down the box) -> the same lines, with a table set inset
+    beside its text read after the paragraph it sits beside. Such a table's rows are lines of their
+    own, starting right of a blank strip that the text lines beside them leave clear: three rows or
+    more, interleaved with two text lines or more, every line of the run on one side of the strip.
+    The paragraph ends at the next line set in from the text's margin (a new paragraph), a heading,
+    or the box's end."""
+    body = [l for l in lines if not l['furniture']]
+    width = box[2] - box[0]
+    right = [l for l in body if l['x0'] > box[0] + 0.3 * width]
+    if len(right) < 3:
+        return lines
+    x = min(l['x0'] for l in right) - 1
+    side = ['R' if l['x0'] > x else 'L' if l['x1'] < x else 'A' for l in body]
+    # the longest run of lines that keep to one side of the strip, rows and text interleaved
+    best = None
+    i = 0
+    while i < len(body):
+        if side[i] == 'A':
+            i += 1
+            continue
+        j = i
+        while j < len(body) and side[j] != 'A':
+            j += 1
+        run = side[i:j]
+        if run.count('R') >= 3 and run.count('L') >= 2 and (best is None or j - i > best[1] - best[0]):
+            best = (i, j)
+        i = j
+    if best is None:
+        return lines
+    i, j = best
+    rows = [l for l, s in zip(body[i:j], side[i:j]) if s == 'R']
+    if any(l.get('heading') for l in rows[1:]):
+        return lines
+    text = [l for l, s in zip(body[i:j], side[i:j]) if s == 'L']
+    margin = min(l['x0'] for l in text)
+    k = j
+    while k < len(body) and not body[k].get('heading') and body[k]['x0'] - margin < 0.5 * body[k]['size']:
+        k += 1
+    moved = {id(l) for l in rows}
+    order = iter([l for l in body[:k] if id(l) not in moved] + rows + body[k:])
+    return [l if l['furniture'] else next(order) for l in lines]    # furniture keeps its place
+
+
 def merge_near(values, tol=2.0):
     out = []
     for v in sorted(values):
@@ -1155,11 +1200,16 @@ def page_lines(page, page_no, icon_fonts=(), marks=None, shapes=None, regions=No
                      if any(edges[i] <= (w['x0'] + w['x1']) / 2 < edges[i + 1] for w in sized))
         # Lines across a gutter are allowed too when they all lie above the columns: an opening
         # set across the page, longer than a standfirst, over columns that start lower down. They
-        # are then read as full-width lines over the columns.
+        # are then read as full-width lines over the columns. Likewise when they all lie below
+        # every column: a footnote set across the page under them.
         across = [w for w in sized if any(w['x0'] < g - 1 and w['x1'] > g + 1 for g in usual)]
         later = [w for w in sized if (w['x0'] + w['x1']) / 2 >= usual[-1] and w not in across]
         opening = bool(across) and bool(later) and max(w['baseline'] for w in across) < min(w['baseline'] for w in later)
-        if sized and (max(crossing) <= max(1, rows // 50) or opening) and filled >= 2:
+        across_rows = {round(w['baseline']) for w in across}
+        in_columns = [w for w in sized if round(w['baseline']) not in across_rows]
+        closing = bool(across) and bool(in_columns) and \
+            min(w['baseline'] for w in across) > max(w['baseline'] for w in in_columns)
+        if sized and (max(crossing) <= max(1, rows // 50) or opening or closing) and filled >= 2:
             gutters = list(usual)
             if used_usual is not None:
                 used_usual.append(True)
@@ -1196,6 +1246,8 @@ def page_lines(page, page_no, icon_fonts=(), marks=None, shapes=None, regions=No
                 if lefts >= 3 and rights >= 3:
                     inner = g
         bl = order_lines(bw, inner, page_no, page.height, blocks=panel_notes(page, box, bw) if box in panels else ())
+        if not inner and box not in panels:
+            bl = move_insets(bl, box)
         parts = titled_tables(page, box, bl)
         for k, (sub, sl) in enumerate(parts):
             sid = bid if len(parts) == 1 else f'{bid}.{k + 1}'

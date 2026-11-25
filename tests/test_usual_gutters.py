@@ -38,6 +38,21 @@ def draw_page(path):
     c.save()
 
 
+def draw_footnote_page(path):
+    """Three columns of text, then a footnote set across the page under them, in the body's type."""
+    c = canvas.Canvas(path, pagesize=A4)
+    w, h = A4
+    c.setFont('Helvetica', 9)
+    for k in range(20):
+        c.drawString(COLS[0], h - 100 - 11 * k, 'Left column words here.')
+        c.drawString(COLS[1], h - 100 - 11 * k, 'Middle column words.')
+        c.drawString(COLS[2], h - 100 - 11 * k, 'Right column words.')
+    c.drawString(50, h - 350, '* For keepers who want a longer night, every marsh lamp takes a second wick of reed.')
+    c.drawString(50, h - 361, 'Trim both wicks at dusk, before the fog comes over the marsh.')
+    c.showPage()
+    c.save()
+
+
 def draw_pages(path):
     """Six pages: the first three hide one of their three columns under a long opening, as
     draw_page() does; the last three show all three. (The hiding pages come first: a tie is not
@@ -101,6 +116,21 @@ class UsualGuttersTest(unittest.TestCase):
         self.assertTrue(any(c == 'right' and t.startswith('Middle column words.') for c, t in texts))
         doc = self.layout('--set-gutters', '1=none')
         self.assertIsNone(doc['gutters']['1'])
+
+    def test_a_footnote_across_the_page_under_the_columns_leaves_them_their_gutters(self):
+        with tempfile.TemporaryDirectory() as d:
+            pdf, out = os.path.join(d, 'page.pdf'), os.path.join(d, 'layout.json')
+            draw_footnote_page(pdf)
+            r = subprocess.run([sys.executable, os.path.join(SCRIPTS, 'pdf_layout.py'), pdf, '--pages', '1',
+                                '--out', out, '--usual-gutters', 'odd=210,380', 'even=200,370'],
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            with open(out, encoding='utf-8') as f:
+                doc = json.load(f)
+        self.assertEqual(doc['gutters']['1'], [210.0, 380.0])
+        texts = [(l['column'], l['text']) for l in doc['lines']]
+        self.assertEqual([c for c, t in texts if 'column' in t], ['left'] * 20 + ['middle'] * 20 + ['right'] * 20)
+        self.assertEqual([c for c, t in texts if 'column' not in t], ['full', 'full'])
 
     def test_without_them_the_columns_run_together(self):
         doc = self.layout()

@@ -119,6 +119,10 @@ class TitleCaseTest(unittest.TestCase):
         self.assertEqual(entry_text.fix_case('roll FOr wIcks!'), 'Roll for Wicks!')
         self.assertEqual(entry_text.fix_case('CharaCteristiC Fp'), 'Characteristic FP')
 
+    def test_a_plural_or_possessive_acronym_keeps_its_s_small(self):
+        self.assertEqual(entry_text.fix_case('LAMPS FOR THE NPCS'), 'Lamps for the NPCs')
+        self.assertEqual(entry_text.fix_case("THE GM'S LAMP"), "The GM's Lamp")
+
 
 class LoneColumnGutterTest(unittest.TestCase):
     def words(self, x0, x1, rows=30):
@@ -585,3 +589,38 @@ class BackdropTest(unittest.TestCase):
         doc, said = self.read(long_lines=False)
         self.assertNotIn('bleeds off the page', said)
         self.assertTrue(any(l.get('box') for l in doc['lines'] if l['text'] == 'LAMP WARDEN'))
+
+
+def panel_line(top, x0, x1, text, **kw):
+    return dict({'page': 10, 'column': 'full', 'top': top, 'baseline': top + 7, 'x0': x0, 'x1': x1, 'text': text,
+                 'size': 9.4, 'furniture': False}, **kw)
+
+
+class InsetTableTest(unittest.TestCase):
+    BOX = (60, 60, 360, 400)
+
+    def lines(self):
+        return [panel_line(80, 140, 260, 'Lamp Rules', heading=3),
+                panel_line(100, 82, 350, 'A keeper may roll once a night to see if'),
+                panel_line(111, 70, 120, 'the lamps hold:'),
+                panel_line(126, 220, 330, 'Wind Modifier', italic=True),       # the table, inset at the right
+                panel_line(128, 82, 190, 'Weather: The more wind'),
+                panel_line(137, 220, 320, 'Calm +1'),
+                panel_line(139, 70, 190, 'the worse the lamps'),
+                panel_line(148, 220, 320, 'Breeze 0'),
+                panel_line(150, 70, 190, 'burn (see table), and'),
+                panel_line(159, 220, 320, 'Gale -2'),
+                panel_line(171, 70, 350, 'the oil runs low by dawn.'),
+                panel_line(182, 82, 350, 'Fog: The lamps burn dim.')]
+
+    def test_a_table_inset_beside_a_panels_text_is_read_after_its_paragraph(self):
+        out = pdf_layout.move_insets(self.lines(), self.BOX)
+        self.assertEqual([l['text'] for l in out], [
+            'Lamp Rules', 'A keeper may roll once a night to see if', 'the lamps hold:', 'Weather: The more wind',
+            'the worse the lamps', 'burn (see table), and', 'the oil runs low by dawn.',
+            'Wind Modifier', 'Calm +1', 'Breeze 0', 'Gale -2', 'Fog: The lamps burn dim.'])
+
+    def test_lines_across_the_strip_leave_the_order_as_it_was(self):
+        lines = self.lines()
+        lines[6] = panel_line(139, 70, 300, 'the worse the lamps burn and')      # text runs across the strip
+        self.assertEqual(pdf_layout.move_insets(lines, self.BOX), lines)

@@ -321,6 +321,26 @@ class TextTableTest(unittest.TestCase):
         self.assertIsNone(entry_text.table_block(header, rows, report, 'rules/odds', '', 2))
         self.assertIn('does not fold into 2 parts with the same column names', report['errors'][0])
 
+    def test_a_folded_tables_later_part_may_be_shorter(self):
+        header = [line(200.0, [(60, 'Skill'), (110, 'Chance'), (200, 'Skill'), (250, 'Chance')], True)]
+        rows = [line(211.0, [(60, '3'), (110, '1%'), (200, '6'), (250, '9%')]),
+                line(222.0, [(60, '4'), (110, '2%'), (200, '7'), (250, '16%')]),
+                line(233.0, [(60, '5'), (110, '5%')])]                     # the right part ends a row early
+        report = {'errors': [], 'questions': []}
+        block = entry_text.table_block(header, rows, report, 'rules/odds', '', 2)
+        self.assertEqual(report['errors'], [])
+        self.assertEqual(block['rows'], [['3', '1%'], ['4', '2%'], ['5', '5%'], ['6', '9%'], ['7', '16%']])
+        self.assertEqual(report['tables'][0]['short_parts'], 1)
+        # a row that fills the later part again, under one that left it blank, fails
+        rows.append(line(244.0, [(60, '8'), (110, '26%'), (200, '9'), (250, '37%')]))
+        report = {'errors': [], 'questions': []}
+        self.assertIsNone(entry_text.table_block(header, rows, report, 'rules/odds', '', 2))
+        self.assertIn('fills a part of the folded table that ended above it', report['errors'][0])
+        # unfolded, a blank cell still fails
+        report = {'errors': [], 'questions': []}
+        self.assertIsNone(entry_text.table_block(header, rows[:3], report, 'rules/odds', ''))
+        self.assertIn('row 3 has nothing in column 3', report['errors'][0])
+
     def test_a_cell_that_lines_up_with_nothing_fails_the_table_and_leaves_its_lines(self):
         t = table([[(70, '1 mile'), right(190, '2 points')],
                    [(70, '10 miles'), right(190, '5 points')],
