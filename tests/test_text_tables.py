@@ -368,6 +368,18 @@ class TextTableTest(unittest.TestCase):
         self.assertEqual(report['errors'], [])
         self.assertEqual(out[0]['block']['rows'], [['Ladder', '1 rung'], ['Rope-down (no gloves)', '2 feet'], ['Wall', '1 foot']])
 
+    def test_a_name_set_over_three_lines_hanging_under_its_first_is_one_row(self):
+        t = table([[(70, 'Pebble'), right(190, '1 oz')],
+                   [(70, 'Basket of')],
+                   [(76, 'river stones')],
+                   [(76, 'or shells'), right(190, '20 lbs')],
+                   [(70, 'Boulder'), right(190, '1 ton')]],
+                  [(70, 'Load'), (160, 'Weight')])
+        out, report = self.read(t)
+        self.assertEqual(report['errors'], [])
+        self.assertEqual(out[0]['block']['rows'], [['Pebble', '1 oz'], ['Basket of river stones or shells', '20 lbs'],
+                                                   ['Boulder', '1 ton']])
+
     def test_a_header_with_no_words_over_a_column_fails(self):
         t = table([[(70, '1 mile'), right(190, '2 points')], [(70, '10 miles'), right(190, '5 points')]],
                   [(70, 'Reach and cost')])
