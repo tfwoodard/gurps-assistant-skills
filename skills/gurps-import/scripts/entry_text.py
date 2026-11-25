@@ -701,7 +701,7 @@ def flush_right_tails(headers, rows, size, right):
     return tails
 
 
-def read_text_table(header, rows, empty=()):
+def read_text_table(header, rows, empty=(), fold=None):
     """Header line(s) and the row lines under them -> (columns, rows of cells, banners, failures).
 
     The columns are the blanks that every row leaves clear: no row has a word there. When none is,
@@ -716,7 +716,9 @@ def read_text_table(header, rows, empty=()):
 
       * the rows leave at least one blank column between them;
       * every row has something in every column, but the cells in `empty` ((row, column), counted
-        from 1), which the page prints blank, and which must be blank;
+        from 1), which the page prints blank, and which must be blank; and, in a table folded into
+        `fold` like parts side by side, the last rows of a later part that is shorter than the
+        first (those rows leave that part, and every part after it, wholly blank);
       * every column has a name in the header or stands under a banner;
       * each column's cells line up: left edges, right edges, centres, or figures ending together."""
     headers = header if isinstance(header, list) else [header]
@@ -944,9 +946,19 @@ def read_text_table(header, rows, empty=()):
     out_rows = [[cell_text(c) for c in r] for r, _ in merged]
     rows = [ls[0] for _, ls in merged]
     grid = first_lines
+    # A folded table's later part may be shorter than the first: its last rows leave it, and
+    # every part after it, blank. From the first such row down, each leaves at least as much.
+    part = len(out_rows[0]) // fold if fold and out_rows and len(out_rows[0]) % fold == 0 else 0
+    short_from = ncols
     for i, r in enumerate(out_rows):
         blank = [c for c in range(ncols) if not r[c] and (i + 1, c + 1) not in empty]
-        if blank:
+        if part and blank and blank == list(range(blank[0], ncols)) and blank[0] % part == 0 and \
+                0 < blank[0] <= short_from:
+            short_from = blank[0]
+            continue
+        if short_from < ncols and not blank:
+            failures.append(f'row {i + 1} fills a part of the folded table that ended above it: {rows[i]["text"]!r}')
+        elif blank:
             failures.append(f'row {i + 1} has nothing in column {blank[0] + 1}: {rows[i]["text"]!r}')
     for i, c in sorted(empty):
         if not (1 <= i <= len(out_rows) and 1 <= c <= ncols) or out_rows[i - 1][c - 1]:
@@ -983,7 +995,7 @@ def table_block(headers, rows, report, where, title='', fold=None, empty=()):
     """Read one text table and note it in the report's `tables`. Returns its block, or None when
     a check failed (the failure is in the report's `errors`, and nothing is written on a guess).
     `empty` lists the cells the page prints blank (read_text_table)."""
-    columns, cells, banners, failures = read_text_table(headers, rows, empty)
+    columns, cells, banners, failures = read_text_table(headers, rows, empty, fold)
     shown = ' / '.join(h['text'] for h in headers)
     note = {'entry': where, 'page': headers[0]['page'], 'header': shown, 'columns': columns, 'rows': cells,
             'failures': failures}
@@ -1007,6 +1019,10 @@ def table_block(headers, rows, report, where, title='', fold=None, empty=()):
             note['failures'].append(f'does not fold into {fold} like parts')
             return None
         cells = [r[k * n:(k + 1) * n] for k in range(fold) for r in cells]
+        if any(not any(r) for r in cells):
+            # a later part shorter than the first: its blank rows at the foot are no rows
+            note['short_parts'] = sum(1 for r in cells if not any(r))
+            cells = [r for r in cells if any(r)]
         columns = parts[0]
         # the names were printed once over each part and are kept once: say so, for the word count
         report.setdefault('folded_keys', []).append({'region': shown, 'entry': where, 'cells': columns * (fold - 1)})

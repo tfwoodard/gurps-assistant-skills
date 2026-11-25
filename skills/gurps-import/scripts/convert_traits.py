@@ -48,7 +48,8 @@ single lines that are not text of the chapter.
 A box that is a table on a tinted panel of its own (the layout marks it `bands`) belongs to an
 entry: `into` names it, and `under` a heading in it to put the table straight after, or `after_text`
 the opening words of the paragraph to put it after (else it goes at the entry's end); `title_lines` says how many of its first lines are its title, and `fold` that it
-is set as that many like tables side by side, to be read one after another.
+is set as that many like tables side by side, to be read one after another (a later part may be
+shorter than the first: its blank rows at the foot are dropped).
 
 `lead_lines` says how many lines after the title are text before the table ("This table
 summarizes ..."): they go into the entry as a paragraph before it. `after_lines` says how many of
