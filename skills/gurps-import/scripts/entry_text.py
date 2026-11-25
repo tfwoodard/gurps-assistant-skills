@@ -50,7 +50,8 @@ SMALL_WORDS = {'a', 'an', 'and', 'as', 'at', 'but', 'by', 'for', 'from', 'in', '
                'to', 'with'}
 
 
-ACRONYMS = {'GM', 'GMS', 'NPC', 'NPCS', 'PC', 'PCS', 'GURPS', 'ST', 'DX', 'IQ', 'HT', 'HP', 'FP', 'TL', 'DR', 'LC', 'SM'}   # kept in capitals
+ACRONYMS = {'GM', 'NPC', 'PC', 'GURPS', 'ST', 'DX', 'IQ', 'HT', 'HP', 'FP', 'TL', 'DR', 'LC', 'SM'}   # kept in capitals
+PLURAL_ACRONYMS = {'GMS', 'NPCS', 'PCS'}     # in capitals but their last s: "NPCs", "GM's"
 
 
 def fix_case(text):
@@ -68,6 +69,10 @@ def fix_case(text):
         core = re.sub(r'[^A-Za-z]', '', orig)
         if core.upper() in ACRONYMS:
             out.append(orig.upper())                        # an acronym (XP, SL) in capitals
+        elif core.upper() in PLURAL_ACRONYMS:
+            u = orig.upper()
+            k = u.rfind('S')
+            out.append(u[:k] + 's' + u[k + 1:])             # its plural or possessive: "NPCs", "GM's"
         elif all_caps and re.fullmatch(r'\([A-Z]{2,3}\)', orig):
             out.append(orig)                                # a short abbreviation in brackets: "(PK)"
         elif re.fullmatch(r'[a-z]\.', orig):

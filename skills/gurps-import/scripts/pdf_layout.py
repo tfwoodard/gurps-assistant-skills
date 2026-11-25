@@ -1155,11 +1155,16 @@ def page_lines(page, page_no, icon_fonts=(), marks=None, shapes=None, regions=No
                      if any(edges[i] <= (w['x0'] + w['x1']) / 2 < edges[i + 1] for w in sized))
         # Lines across a gutter are allowed too when they all lie above the columns: an opening
         # set across the page, longer than a standfirst, over columns that start lower down. They
-        # are then read as full-width lines over the columns.
+        # are then read as full-width lines over the columns. Likewise when they all lie below
+        # every column: a footnote set across the page under them.
         across = [w for w in sized if any(w['x0'] < g - 1 and w['x1'] > g + 1 for g in usual)]
         later = [w for w in sized if (w['x0'] + w['x1']) / 2 >= usual[-1] and w not in across]
         opening = bool(across) and bool(later) and max(w['baseline'] for w in across) < min(w['baseline'] for w in later)
-        if sized and (max(crossing) <= max(1, rows // 50) or opening) and filled >= 2:
+        across_rows = {round(w['baseline']) for w in across}
+        in_columns = [w for w in sized if round(w['baseline']) not in across_rows]
+        closing = bool(across) and bool(in_columns) and \
+            min(w['baseline'] for w in across) > max(w['baseline'] for w in in_columns)
+        if sized and (max(crossing) <= max(1, rows // 50) or opening or closing) and filled >= 2:
             gutters = list(usual)
             if used_usual is not None:
                 used_usual.append(True)

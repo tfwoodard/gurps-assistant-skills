@@ -119,6 +119,10 @@ class TitleCaseTest(unittest.TestCase):
         self.assertEqual(entry_text.fix_case('roll FOr wIcks!'), 'Roll for Wicks!')
         self.assertEqual(entry_text.fix_case('CharaCteristiC Fp'), 'Characteristic FP')
 
+    def test_a_plural_or_possessive_acronym_keeps_its_s_small(self):
+        self.assertEqual(entry_text.fix_case('LAMPS FOR THE NPCS'), 'Lamps for the NPCs')
+        self.assertEqual(entry_text.fix_case("THE GM'S LAMP"), "The GM's Lamp")
+
 
 class LoneColumnGutterTest(unittest.TestCase):
     def words(self, x0, x1, rows=30):
