@@ -187,7 +187,7 @@ def table_like(l):
     return any(b[1] - a[2] > 2.5 * l['size'] for a, b in zip(ws, ws[1:]))
 
 
-def convert_chapter(layout, plan, taken=None, words=None, dictionary=None):
+def convert_chapter(layout, plan, taken=None, words=None, dictionary=None, skill_lookup=None):
     taken = taken or {}
     report = {'errors': [], 'questions': [], 'left_out': [], 'dehyphenated': [], 'table_like': [], 'tables': [],
               'printed_fields': list(PRINTED_FIELDS), 'same_name': [], 'counts': {}}
@@ -219,7 +219,8 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None):
     vocab |= {w.lower() for w in plan.get('hyphenated_words', [])}  # or says keep their hyphen
     vocab.dictionary = frozenset(dictionary or ())    # English words, for what the book prints nowhere else
     # the equipment tables the plan names: entries of their own, out of the text
-    lines, table_entries = take_tables(lines, plan, report, vocab, source, chapter, layout.get('regions', []))
+    lines, table_entries = take_tables(lines, plan, report, vocab, source, chapter, layout.get('regions', []),
+                                       skill_lookup)
     if plan.get('indent', True):
         mark_paragraphs(lines)
     body = [l for l in lines if not l.get('box')]
@@ -791,7 +792,19 @@ def main(argv=None):
     elif a.dictionary:
         with open(a.dictionary, encoding='utf-8') as f:
             dictionary = {w.strip().lower() for w in f if w.strip()}
-    entries, report = convert_chapter(layout, plan, taken, words, dictionary)
+    skill_lookup = None
+    if a.library_data:
+        skills_dir = os.path.join(a.library_data, 'skills')
+
+        def skill_lookup(slug):
+            # a skills entry's name and text, for the skill an equipment table's group names
+            path = os.path.join(skills_dir, slug + '.json')
+            if not os.path.exists(path):
+                return None
+            with open(path, encoding='utf-8') as f:
+                e = json.load(f)
+            return e['name'], render(e)
+    entries, report = convert_chapter(layout, plan, taken, words, dictionary, skill_lookup)
     os.makedirs(a.out, exist_ok=True)
     for old in os.listdir(a.out):
         if old.endswith(('.json', '.md')):

@@ -19,9 +19,18 @@ take_tables() takes each table the plan names out of a chapter's lines and makes
     of two skills), is one entry with each table's rows; but one name printed twice in one group,
     at two TLs, is two items, each named with its TL ("Kite (TL1)", "Kite (TL2)"), the later
     distinct-from the first (as GCA's data files give them). Its fields: `kind`
-    (the plan's), `group` (each group it is in, as printed), and its first row's cells by column
-    (`tl`, `cost`, `weight`, `lc`... as printed), with `modes` holding every row's cells when it has
-    more than one.
+    (the plan's), `group` (each group it is in, as printed), `skills` (the skills its groups name,
+    group_skills()), and its first row's cells by column (`tl`, `cost`, `weight`, `lc`... as
+    printed), with `modes` holding every row's cells when it has more than one (each with the
+    `skill` its group names, when the item is in more than one group).
+
+A group heading set in capitals names the skill the items are used with: "KITE FLYING/TL (BOX)
+(DX-4, or other Kite Flying at -2)" is the skill Kite Flying/TL, its specialty Box, and its
+defaults; "BRAWLING-2 or DX-2" names a skill at a penalty, with DX-2 for its default. Each skill
+must be an entry in the library's skills (`skill_lookup`), and its specialty a phrase that entry's
+text prints, which gives its case ("RC" stays RC, "BOX" is Box); a heading that names
+something else fails its table. A heading in upper and lower case ("Body Armor") is a kind, not a
+skill. Without a skill_lookup, no skill is linked, and the report says so (`skills_not_linked`).
 
 Every table is checked as the text tables are (entry_text.read_text_table): the rows leave blank
 columns between them, the header names each column, each column's cells line up. A row may leave a
@@ -358,10 +367,89 @@ def notes_below(lines, title, regions, taken):
     return got, None
 
 
-def take_tables(lines, plan, report, vocab, source, chapter, regions=()):
+ATTRIBUTE = re.compile(r'^(?:ST|DX|IQ|HT|Will|Per)(?:\s*[+-]\d+)?$')
+
+
+def bracketed_parts(text):
+    """'A (B) (C (D))' -> ('A', ['B', 'C (D)']); None when the brackets don't pair or text
+    follows them."""
+    lead_end = text.find('(')
+    if lead_end < 0:
+        return text.strip(), []
+    lead, parts, depth, start = text[:lead_end].strip(), [], 0, None
+    for k, ch in enumerate(text[lead_end:], lead_end):
+        if ch == '(':
+            if depth == 0:
+                start = k + 1
+            depth += 1
+        elif ch == ')':
+            depth -= 1
+            if depth < 0:
+                return None
+            if depth == 0:
+                parts.append(text[start:k].strip())
+        elif depth == 0 and not ch.isspace():
+            return None
+    return (lead, parts) if depth == 0 else None
+
+
+def printed_case(phrase, text):
+    """How `text` prints `phrase` (any case) as a name, each word capitalised or in capitals: the
+    commonest such printing, or None."""
+    found = re.findall(r'(?<![\w-])' + re.escape(phrase) + r'(?![\w-])', text, re.I)
+    named = [f for f in found if all(w[0].isupper() for w in re.split(r'[\s/-]+', f) if w)]
+    return max(named, key=named.count) if named else None
+
+
+def group_skills(heading, skill_lookup):
+    """A group heading -> (skills, failure). skills is None for a heading that names no skill (one
+    in upper and lower case, a kind of item), else a list of {name, to, specialty?, modifier?,
+    defaults?}. skill_lookup(slug) -> (the skill entry's name, its text) or None."""
+    parts = bracketed_parts(heading)
+    if parts is None:
+        return None, f'the group heading {heading!r}: its brackets do not pair'
+    lead, brackets = parts
+    tokens = [t for t in re.split(r'\s*,\s*(?:or\s+)?|\s+or\s+', lead) if t]
+    if not tokens or any(re.search(r'[a-z]', t) for t in tokens if not ATTRIBUTE.match(t)):
+        return None, None
+    attributes = [t for t in tokens if ATTRIBUTE.match(t)]
+    skills_ = [t for t in tokens if not ATTRIBUTE.match(t)]
+    specialty = None
+    if brackets and not re.search(r'[a-z\d]', brackets[0]) and not ATTRIBUTE.match(brackets[0]):
+        specialty = brackets.pop(0)
+    if len(brackets) > 1 or (brackets and attributes) or not skills_ or (specialty and len(skills_) > 1):
+        return None, f'the group heading {heading!r} is not a skill, a specialty and its defaults'
+    defaults = brackets[0] if brackets else ', or '.join(attributes) or None
+    out = []
+    for t in skills_:
+        m = re.match(r'^(.*?)\s*([+-]\d+)?$', t)
+        printed, modifier = m.group(1), m.group(2)
+        tl = printed.endswith('/TL')
+        slug = slugify(printed[:-3] if tl else printed)
+        found = skill_lookup(slug)
+        if found is None:
+            return None, f'the group heading {heading!r} names the skill {printed!r}: no skills/{slug} entry'
+        name, text = found
+        skill = {'name': name + ('/TL' if tl else ''), 'to': f'skills/{slug}'}
+        if specialty:
+            spelled = printed_case(specialty, text)
+            if spelled is None:
+                return None, f'the group heading {heading!r}: the skill {name} prints no specialty {specialty!r}'
+            skill['name'] += f' ({spelled})'
+            skill['specialty'] = spelled
+        if modifier:
+            skill['modifier'] = modifier
+        if defaults:
+            skill['defaults'] = defaults
+        out.append(skill)
+    return out, None
+
+
+def take_tables(lines, plan, report, vocab, source, chapter, regions=(), skill_lookup=None):
     """Take the plan's equipment tables out of `lines`. Returns (the other lines, entries as
     (category, entry)). A table on a panel whose notes are printed under the panel, on the page
-    (`"notes_below": true` in its spec), takes them from there (notes_below())."""
+    (`"notes_below": true` in its spec), takes them from there (notes_below()). skill_lookup(slug)
+    -> (name, text) of a skills entry, to link the skills the groups name (group_skills())."""
     specs = plan.get('equipment_tables', [])
     entries, items, table_notes = [], {}, {}
     taken = set()
@@ -379,7 +467,17 @@ def take_tables(lines, plan, report, vocab, source, chapter, regions=()):
         groups, notes, failures = read_table(spec, region, report, vocab, extra)
         if failure:
             failures.append(failure)
+        heading_skills = {}
+        for g in groups:
+            if skill_lookup is None:
+                break
+            skills_, failure = group_skills(g['heading'], skill_lookup)
+            if failure:
+                failures.append(failure)
+            heading_skills[g['heading']] = skills_
         name = spec.get('name', plain(region[0]['text']).strip())
+        if skill_lookup is None and groups:
+            report.setdefault('skills_not_linked', []).append(f'{name}: no library skills given')
         table_notes[name] = notes
         report.setdefault('equipment_tables', []).append({
             'title': name, 'page': spec['page'], 'pages': sorted({l['page'] for l in region}),
@@ -436,6 +534,8 @@ def take_tables(lines, plan, report, vocab, source, chapter, regions=()):
                     if current is None:
                         first = dict(zip(keys, row))
                         fields = {'kind': spec['kind'], 'group': [g['heading']]}
+                        if heading_skills.get(g['heading']):
+                            fields['skills'] = list(heading_skills[g['heading']])
                         fields.update({k: v for k, v in first.items() if v and k != keys[spec.get('name_column', 1)]})
                         current = {'slug': slug, 'name': item_name, 'source': source, 'chapter': chapter,
                                    'section': name, 'page': region[0]['page'], 'fields': fields, 'level': 2,
@@ -446,10 +546,13 @@ def take_tables(lines, plan, report, vocab, source, chapter, regions=()):
                         entries.append(('equipment', current))
                     elif g['heading'] not in current['fields']['group']:
                         current['fields']['group'].append(g['heading'])
+                        for s in heading_skills.get(g['heading']) or ():
+                            if s not in current['fields'].setdefault('skills', []):
+                                current['fields']['skills'].append(s)
                     current['_tables'].append((name, g['heading'], g['columns']))
-                    current['_rows'].append((name, g['heading'], row, g['columns']))
+                    current['_rows'].append((name, g['heading'], row, g['columns'], heading_skills.get(g['heading'])))
                 elif current is not None:
-                    current['_rows'].append((name, g['heading'], row, g['columns']))
+                    current['_rows'].append((name, g['heading'], row, g['columns'], heading_skills.get(g['heading'])))
                 for cited in CITES.findall(row[-1] if g['columns'][-1] == 'Notes' else ''):
                     for n in re.split(r'\s*,\s*', cited):
                         if current is not None and n in notes and (name, n) not in current['_notes']:
@@ -461,20 +564,24 @@ def take_tables(lines, plan, report, vocab, source, chapter, regions=()):
             if (table, heading) in seen:
                 continue
             seen.append((table, heading))
-            rows = [r for t, h, r, _ in e['_rows'] if (t, h) == (table, heading)]
+            rows = [r for t, h, r, _, _ in e['_rows'] if (t, h) == (table, heading)]
             e['content'].append({'type': 'heading', 'level': 3, 'text': heading})
             e['content'].append({'type': 'table', 'title': '', 'columns': columns, 'rows': rows,
                                  'data': table_data(columns, rows, report, f'equipment/{slug}')})
         all_rows = e.pop('_rows')
         if len(all_rows) > 1:
             # every row, keyed by its own table's columns (a spear's melee and thrown rows differ)
-            tables_ = {t for t, _, _, _ in all_rows}
+            tables_ = {t for t, _, _, _, _ in all_rows}
+            groups_ = {(t, h) for t, h, _, _, _ in all_rows}
             e['fields']['modes'] = []
-            for t, _, r, columns in all_rows:
+            for t, _, r, columns, skills_ in all_rows:
                 keys = [slugify(c).replace('-', '_') or f'column_{k + 1}' for k, c in enumerate(columns)]
                 mode = {k: v for k, v in zip(keys, r) if v}
                 if len(tables_) > 1:
                     mode['table'] = t
+                if len(groups_) > 1 and skills_:
+                    # which skill this row is used with (a sword's one-handed and two-handed rows)
+                    mode['skill'] = ' or '.join(s['name'] for s in skills_)
                 e['fields']['modes'].append(mode)
         cited = e.pop('_notes')
         if cited:

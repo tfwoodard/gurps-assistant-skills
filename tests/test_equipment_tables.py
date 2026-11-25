@@ -219,5 +219,77 @@ class EquipmentTablesTest(unittest.TestCase):
         self.assertEqual(report['errors'], ["plan equipment table 'Candle Table': no such title on p10"])
 
 
+# invented skills entries: (name, text)
+SKILLS = {'lamps': ('Lamps', 'Lamps\nTending lamps of every kind.'),
+          'torches': ('Torches', 'Torches\nCarrying a torch.'),
+          'kite-flying': ('Kite Flying', 'Kite Flying/TL\nYou must specialize: Box, Delta, or RC (a radio-'
+                                         'controlled kite). Flying a box kite is the easiest.'),
+          'rowing': ('Rowing', 'Rowing'), 'swimming': ('Swimming', 'Swimming')}
+
+
+class GroupSkillsTest(unittest.TestCase):
+    def skills(self, heading):
+        return equipment_tables.group_skills(heading, SKILLS.get)
+
+    def test_a_skill_and_its_defaults(self):
+        self.assertEqual(self.skills('LAMPS (DX-4, Torch-2, or Lantern-1)'),
+                         ([{'name': 'Lamps', 'to': 'skills/lamps', 'defaults': 'DX-4, Torch-2, or Lantern-1'}], None))
+        self.assertEqual(self.skills('TORCHES (DX)'), ([{'name': 'Torches', 'to': 'skills/torches', 'defaults': 'DX'}], None))
+
+    def test_a_specialty_takes_its_case_from_the_skills_entry(self):
+        box, _ = self.skills('KITE FLYING/TL (BOX) (DX-4, or other Kite Flying at -2)')
+        self.assertEqual(box, [{'name': 'Kite Flying/TL (Box)', 'to': 'skills/kite-flying', 'specialty': 'Box',
+                                'defaults': 'DX-4, or other Kite Flying at -2'}])
+        rc, _ = self.skills('KITE FLYING/TL (RC)')
+        self.assertEqual(rc, [{'name': 'Kite Flying/TL (RC)', 'to': 'skills/kite-flying', 'specialty': 'RC'}])
+
+    def test_several_skills_at_a_penalty_or_an_attribute(self):
+        self.assertEqual(self.skills('ROWING-2, SWIMMING-2, or DX-2'), ([
+            {'name': 'Rowing', 'to': 'skills/rowing', 'modifier': '-2', 'defaults': 'DX-2'},
+            {'name': 'Swimming', 'to': 'skills/swimming', 'modifier': '-2', 'defaults': 'DX-2'}], None))
+
+    def test_a_heading_in_upper_and_lower_case_names_no_skill(self):
+        self.assertEqual(self.skills('Hand Lamps'), (None, None))
+
+    def test_an_unknown_skill_or_specialty_is_a_failure(self):
+        self.assertIn('no skills/candles entry', self.skills('CANDLES (DX-4)')[1])
+        self.assertIn("prints no specialty 'GLIDER'", self.skills('KITE FLYING/TL (GLIDER) (DX-4)')[1])
+
+
+class TableSkillsTest(unittest.TestCase):
+    def take(self, lines, skills=SKILLS):
+        report = {'errors': [], 'questions': []}
+        plan = {'equipment_tables': PLAN['equipment_tables'][:1]}
+        _, entries = equipment_tables.take_tables(lines, plan, report, None, 'ML', 'ch8', (), skills.get)
+        return dict(((c, e['slug']), e) for c, e in entries), report
+
+    def test_an_item_links_the_skill_its_group_names(self):
+        entries, report = self.take(lamp_table())
+        self.assertEqual(report['errors'], [])
+        self.assertNotIn('skills_not_linked', report)
+        self.assertEqual(entries[('equipment', 'oil-lamp')]['fields']['skills'],
+                         [{'name': 'Lamps', 'to': 'skills/lamps', 'defaults': 'DX-4'}])
+
+    def test_an_item_in_two_groups_has_both_skills_and_each_mode_its_own(self):
+        lines = lamp_table()
+        lines[7] = row(188.0, ['2', 'Glass Lantern', '1 yd', '$40', ''])       # in TORCHES as well
+        entries, report = self.take(lines)
+        fields = entries[('equipment', 'glass-lantern')]['fields']
+        self.assertEqual([s['name'] for s in fields['skills']], ['Lamps', 'Torches'])
+        self.assertEqual([m['skill'] for m in fields['modes']], ['Lamps', 'Lamps', 'Torches'])
+
+    def test_a_group_naming_no_skills_entry_fails_the_table(self):
+        entries, report = self.take(lamp_table(), {'lamps': SKILLS['lamps']})
+        self.assertEqual(entries, {})
+        self.assertIn('no skills/torches entry', report['errors'][0])
+
+    def test_without_library_skills_the_report_says_none_were_linked(self):
+        report = {'errors': [], 'questions': []}
+        _, entries = equipment_tables.take_tables(lamp_table(), {'equipment_tables': PLAN['equipment_tables'][:1]},
+                                                  report, None, 'ML', 'ch8')
+        self.assertEqual(report['skills_not_linked'], ['Lamp Table: no library skills given'])
+        self.assertTrue(all('skills' not in e['fields'] for _, e in entries))
+
+
 if __name__ == '__main__':
     unittest.main()
