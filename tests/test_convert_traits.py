@@ -857,6 +857,15 @@ class HeadingLinesTest(unittest.TestCase):
         lines = [self.head('LAMPS', 20.0, 70.0), self.head('Wicks', 15.0, 90.0), self.head('LANTERNS', 20.0, 110.0)]
         self.assertEqual(self.runs(lines), [('heading', ['LAMPS']), ('heading', ['Wicks']), ('heading', ['LANTERNS'])])
 
+    def test_a_line_ending_on_a_joining_word_runs_on_into_a_larger_one(self):
+        # "OIL AND WAX OF" set smaller over "LAMPS AND CANDLES": one heading, at the larger size
+        a, b = self.head('OIL AND WAX OF', 15.0, 70.0), self.head('LAMPS AND CANDLES', 20.0, 95.0)
+        b['heading'] = 1
+        runs = convert_traits.group_headings([a, b], lambda l: bool(l.get('heading')))
+        self.assertEqual([[l['text'] for l in run] for _, run in runs], [['OIL AND WAX OF', 'LAMPS AND CANDLES']])
+        self.assertEqual([(l['size'], l['heading']) for l in runs[0][1]], [(20.0, 1), (20.0, 1)])
+        self.assertEqual(a['size'], 15.0)      # the layout's own line is left as read
+
 
 if __name__ == '__main__':
     unittest.main()

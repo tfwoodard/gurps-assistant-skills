@@ -96,6 +96,8 @@ class CapitalsTest(unittest.TestCase):
         self.assertEqual(entry_text.fix_case('OPTIONS: STORM LAMPS (TOWER)'), 'Options: Storm Lamps (Tower)')
         self.assertEqual(entry_text.fix_case('OIL COSTS IN FP'), 'Oil Costs in FP')
         self.assertEqual(entry_text.fix_case('Who Trims the Wick?'), 'Who Trims the Wick?')
+        # each part of a word joined by a hyphen or a slash
+        self.assertEqual(entry_text.fix_case('WICK-TRIMMING AND OIL/WAX TABLE'), 'Wick-Trimming and Oil/Wax Table')
 
 
 class HeadingSizeTest(unittest.TestCase):

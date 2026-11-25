@@ -83,8 +83,9 @@ def fix_case(text):
             k = next((j for j, ch in enumerate(w) if ch.isalpha()), 0)   # "(elves)" -> "(Elves)"
             w = w[:k] + w[k:k + 1].upper() + w[k + 1:]
             if all_caps:
-                # each part of a hyphenated word set in capitals: "META-TRAITS" -> "Meta-Traits"
-                w = re.sub(r'-([a-z])', lambda m: '-' + m.group(1).upper(), w)
+                # each part of a word set in capitals and joined by a hyphen or a slash:
+                # "META-TRAITS" -> "Meta-Traits", "LAMP/WICK" -> "Lamp/Wick"
+                w = re.sub(r'([-/])([a-z])', lambda m: m.group(1) + m.group(2).upper(), w)
             out.append(w)
     return ' '.join(out)
 
@@ -365,6 +366,39 @@ def starts_with_label(l):
     rest = [sp for sp in l['spans'][l['spans'].index(first) + 1:] if sp['text'].strip()]
     # the label alone on its line, or followed by text in another style
     return not rest or not (rest[0]['bold'] == first['bold'] and rest[0]['italic'] == first['italic'])
+
+
+def hanging_items(lines):
+    """Mark `para` on lines set as a list of items with hanging indents, with no label style to
+    tell them by ("Wet wick: -2" at the column's edge, its later lines set in under it), and
+    perhaps ordinary paragraphs among them (first line set in, the rest at the edge). A line at
+    the column's edge starts an item, unless it carries on a paragraph whose sentence has not
+    ended; a line set in carries on the item above it, or, where no item is open, starts a
+    paragraph after a sentence's end. A heading closes the item or paragraph before it."""
+    def group(l):
+        return (l['page'], l['column'], l.get('box'))
+
+    edge = {}
+    for l in lines:
+        if not l.get('heading'):
+            edge[group(l)] = min(edge.get(group(l), l['x0']), l['x0'])
+    mode, prev = None, None              # mode: 'item' or 'paragraph', whichever is open
+    for l in lines:
+        if l.get('heading'):
+            mode, prev = None, None
+            continue
+        ended = prev is None or bool(SENTENCE_END.search(plain(prev['text'])))
+        if INDENT[0] <= l['x0'] - edge[group(l)] <= INDENT[1]:
+            if mode == 'item' or not ended:
+                l['para'] = False                # an item's later line, or a paragraph's
+            else:
+                l['para'], mode = True, 'paragraph'
+        elif mode == 'paragraph' and not ended:
+            l['para'] = False                    # a paragraph's later line, at the edge
+        else:
+            l['para'], mode = True, 'item'
+        prev = l
+    return lines
 
 
 def new_paragraph(l, prev):
@@ -721,10 +755,28 @@ def read_text_table(header, rows, empty=(), fold=None):
         first (those rows leave that part, and every part after it, wholly blank);
       * every column has a name in the header or stands under a banner;
       * each column's cells line up: left edges, right edges, centres, or figures ending together."""
+    columns, cells, banners, failures, _ = read_grouped_table(header, rows, empty, fold)
+    return columns, cells, banners, failures
+
+
+def read_grouped_table(header, rows, empty=(), fold=None):
+    """read_text_table, for rows that may hold group headings: a heading line among them (a
+    larger or bolder line, "Lamps" over the rows of lamps) is no row but starts a group. Returns
+    its (columns, rows of cells, banners, failures, groups), each group {"before": the index of
+    the first row under it, "text": its words}."""
     headers = header if isinstance(header, list) else [header]
     size = headers[0]['size']
     shown = ' / '.join(h['text'] for h in headers)
     failures = []
+    group_lines, kept = [], []                 # (how many row lines come before it, its line)
+    for l in rows:
+        if l.get('heading'):
+            group_lines.append((len(kept), l))
+        else:
+            kept.append(l)
+    rows = kept
+    if not rows:
+        return [], [], [], ['it has no rows'], []
     left = min(l['x0'] for l in rows)
     right = max(l['x1'] for l in rows)
 
@@ -758,7 +810,7 @@ def read_text_table(header, rows, empty=(), fold=None):
         # cell before it reaches past where a short one of its own begins.
         tails = flush_right_tails(headers, rows, size, right)
         if tails is None:
-            return [], [], [], ['its rows leave no blank column between them: it reads as one column']
+            return [], [], [], ['its rows leave no blank column between them: it reads as one column'], []
         seps = blanks(tails)
     ncols = len(seps) + 1 + bool(tails)
     edges = [float('-inf')] + seps + [float('inf')]
@@ -907,10 +959,11 @@ def read_text_table(header, rows, empty=(), fold=None):
     def name_only(r):
         return bool(r[0]) and not any(r[1:])
 
-    g2, r2, k = [], [], 0
+    g2, r2, s2, k = [], [], [], 0             # s2: each row's first line, counted in `rows`
     while k < len(grid):
         r = grid[k]
         j = k
+        s2.append(k)
         while j + 1 < len(grid) and name_only(grid[j]) and reads_on(grid[j][0], grid[j + 1][0]) and \
                 (name_only(grid[j + 1]) or all(grid[j + 1])):
             j += 1
@@ -923,15 +976,18 @@ def read_text_table(header, rows, empty=(), fold=None):
             r2.append(rows[k])
             k += 1
     grid, rows = g2, r2
-    first_lines, merged = [], []
-    for r, l in zip(grid, rows):
-        if merged and not r[0] and any(r[1:]):
+    first_lines, merged, starts = [], [], []
+    for r, l, s in zip(grid, rows, s2):
+        # (a group's heading parts the rows: a line under it starts a row of its own)
+        if merged and not r[0] and any(r[1:]) and not any(starts[-1] < n <= s for n, _ in group_lines):
             for c in range(ncols):
                 merged[-1][0][c] = merged[-1][0][c] + r[c]
             merged[-1][1].append(l)
         else:
             merged.append(([list(c) for c in r], [l]))
             first_lines.append(r)
+            starts.append(s)
+    groups = [{'before': sum(1 for s in starts if s < n), 'text': plain(g['text']).strip()} for n, g in group_lines]
     def cell_text(ws):
         # a cell carried on to the next line after a slash ("Salt/" over "Pepper Mill") joins it
         # with no space; a slash and a space on one line ("w/ salt") stay as printed
@@ -988,17 +1044,23 @@ def read_text_table(header, rows, empty=(), fold=None):
             texts = ', '.join(repr(' '.join(w[0] for w in col[k])) for k in stray[:4])
             failures.append(f'in column {c + 1} ({columns[c] or "no name"}), {texts} '
                             f'{"does" if len(stray) == 1 else "do"} not line up with the other cells')
-    return columns, out_rows, banners, failures
+    if groups and fold:
+        failures.append('it has group headings and is folded: which part a group heads is not known')
+    if groups and groups[0]['before'] != 0:
+        failures.append(f'rows come before its first group heading ({groups[0]["text"]!r})')
+    return columns, out_rows, banners, failures, groups
 
 
 def table_block(headers, rows, report, where, title='', fold=None, empty=()):
     """Read one text table and note it in the report's `tables`. Returns its block, or None when
     a check failed (the failure is in the report's `errors`, and nothing is written on a guess).
     `empty` lists the cells the page prints blank (read_text_table)."""
-    columns, cells, banners, failures = read_text_table(headers, rows, empty, fold)
+    columns, cells, banners, failures, groups = read_grouped_table(headers, rows, empty, fold)
     shown = ' / '.join(h['text'] for h in headers)
     note = {'entry': where, 'page': headers[0]['page'], 'header': shown, 'columns': columns, 'rows': cells,
             'failures': failures}
+    if groups:
+        note['groups'] = groups
     if empty:
         note['blank_as_printed'] = [list(c) for c in sorted(empty)]
     if banners:
@@ -1033,6 +1095,8 @@ def table_block(headers, rows, report, where, title='', fold=None, empty=()):
              'data': table_data(names, cells, report, where)}
     if banners:
         block['banners'] = banners
+    if groups:
+        block['groups'] = groups
     return block
 
 
@@ -1095,7 +1159,7 @@ def with_text_tables(lines, report, where):
 # "3", "5-6", "14, 15", "40+", "18 or more"; the dash after it may stand against it ("11– ...")
 KEY = re.compile(r'^\s*(?P<key>\d+(?:\s*[-–]\s*\d+|(?:\s*,\s*\d+)+)?\+?(?:\s+or\s+(?:more|less))?)'
                  r'(?:\s+[–—-]|[–—])\s+\S')
-FOOTNOTE_MARK = re.compile(r'^\s*[*†‡]+\s+\S')
+FOOTNOTE_MARK = re.compile(r'^\s*[*†‡§]+\s+\S')
 
 
 def with_keyed_lists(lines, report, where, vocab=None):

@@ -66,7 +66,13 @@ set over two or more lines is given joined). A list's `traits.category` may be `
 section of advantages and disadvantages together: a cost printed with a minus makes a
 disadvantage, any other an advantage, and `categories` ({name: category}) names exceptions.
 A plan `entries` key may carry a page ("rules/example-contd@18") to reach one of several entries
-of one name in the chapter (a running example's parts, each titled the same). A list's `traits`
+of one name in the chapter (a running example's parts, each titled the same). An entry there may
+take a `category` ("tables", for a section that is a reference table, with `fields` `about` and
+`roll`) and a `name` (the table's own, where the heading over it is another: the heading stays in
+`printed_name`). A box that carries on an entry on the next page, under its title again, says
+`continues` with that entry's ref: its text goes on at the end of it. `hanging_lists` names entries
+whose text is items set with hanging indents and no label style ("Wet wick: -2", its later lines set
+in): each item is a paragraph (entry_text.hanging_items). A list's `traits`
 can also say:
 
   * `"line": "skill"` when the line under a name is an attribute and a difficulty ("IQ/Hard"), and
@@ -117,7 +123,8 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from entry_text import (SMALL_WORDS, blocks_from_lines, fix_case, is_table_header, join_lines,  # noqa: E402
+from entry_text import (FOOTNOTE_MARK, SMALL_WORDS, blocks_from_lines, fix_case, hanging_items,  # noqa: E402
+                        is_table_header, join_lines,
                         mark_paragraphs, marked, plain, slugify, table_block, vocabulary, with_keyed_lists,
                         with_text_tables)
 from render_entry import render  # noqa: E402
@@ -152,17 +159,26 @@ def joining_words(l):
     return bool(words) and all(w in SMALL_WORDS or w == '&' for w in words)
 
 
+def ends_open(l):
+    """A heading line that ends on a joining word ("LAMPS OF"): the heading goes on below."""
+    words = plain(l['text']).lower().split()
+    return bool(words) and words[-1] in SMALL_WORDS
+
+
 def group_headings(lines, is_heading):
     """[(kind, run of lines)]: consecutive heading lines of one size, close together, are one
-    heading, and so are the lines either side of a line of joining words set in another size;
-    every other line is its own run."""
+    heading, and so are the lines either side of a line of joining words set in another size, and
+    a line ending on a joining word and the line under it (a title's first line set smaller: the
+    run takes the larger line's size and level); every other line is its own run."""
     out = []
     for l in lines:
         prev = out[-1][1][-1] if out and out[-1][0] == 'heading' else None
-        alike = prev is not None and (near(prev['size'], l['size']) or joining_words(l) or
+        alike = prev is not None and (near(prev['size'], l['size']) or joining_words(l) or ends_open(prev) or
                                       (joining_words(prev) and len(out[-1][1]) > 1 and near(out[-1][1][-2]['size'], l['size'])))
         if is_heading(l) and alike and prev['page'] == l['page'] and prev['column'] == l['column'] and \
                 0 < l['baseline'] - prev['baseline'] < 1.6 * max(l['size'], prev['size']):
+            if ends_open(prev) and l['size'] > out[-1][1][0]['size'] + 0.3:
+                out[-1] = ('heading', [dict(x, size=l['size'], heading=l.get('heading')) for x in out[-1][1]])
             out[-1][1].append(l)
         else:
             out.append(('heading' if is_heading(l) else 'line', [l]))
@@ -243,9 +259,20 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None, skill
     trait_sections = {(s['page'], s['heading'].lower()): s for s in plan.get('sections', [])}
     used_sections = set()
     entries = list(table_entries)           # (category, entry)
+    used_hanging = set()
 
     def add(category, name, first, section, fields, content_lines, level, base_size, extra=None):
         where = f'{category}/{slugify(name)}'
+        entry = {'slug': slugify(name), 'name': name, 'source': source, 'chapter': chapter, 'section': section,
+                 'page': first['page'], 'fields': fields, 'level': level, 'content': read_blocks(where, content_lines)}
+        entry.update(extra or {})
+        entries.append((category, entry))
+        return entry
+
+    def read_blocks(where, content_lines):
+        if where in plan.get('hanging_lists', []):
+            hanging_items(content_lines)
+            used_hanging.add(where)
         content_lines = with_text_tables(content_lines, report, where)
         content_lines = with_keyed_lists(content_lines, report, where, vocab)
         blocks = blocks_from_lines(content_lines, report, where, vocab)
@@ -256,14 +283,10 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None, skill
             if b['type'] == 'table':
                 b['read_with'] = [side for side, j in (('before', k - 1), ('after', k + 1))
                                   if 0 <= j < len(blocks) and blocks[j]['type'] == 'paragraph']
-        entry = {'slug': slugify(name), 'name': name, 'source': source, 'chapter': chapter, 'section': section,
-                 'page': first['page'], 'fields': fields, 'level': level, 'content': blocks}
-        entry.update(extra or {})
         for l in content_lines:
             if not l.get('heading') and not l.get('block') and table_like(l):
                 report['table_like'].append({'entry': where, 'page': l['page'], 'text': l['text']})
-        entries.append((category, entry))
-        return entry
+        return blocks
 
     def creature_section(c, title, title_printed, head, inner, parent, level, size):
         """A section that is a list of creatures. A heading at the creatures' name size (or the
@@ -624,13 +647,33 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None, skill
                 after_blocks = [{'type': 'list', 'ordered': False, 'keys': [n for n, _ in notes],
                                  'items': [join_lines(parts, report, target, vocab) for _, parts in notes]}]
             else:
-                after_blocks = blocks_from_lines(after, report, target, vocab)
+                # each footnote ("* Only by day." under "† Twice in a fog.") a paragraph of its own
+                parts = []
+                for l in after:
+                    if not parts or FOOTNOTE_MARK.match(l['text']):
+                        parts.append([])
+                    parts[-1].append(l)
+                after_blocks = [b for part in parts for b in blocks_from_lines(part, report, target, vocab)]
             for j, b in enumerate(after_blocks):
                 blocks.insert(at + 1 + j, b)
             block['read_with'] = [side for side, j in (('before', at - 1), ('after', at + 1))
                                   if 0 <= j < len(blocks) and blocks[j]['type'] == 'paragraph']
             continue
         bruns = group_headings(bl, lambda l: bool(l.get('heading')))
+        if bp.get('continues'):
+            # A panel carrying on one before it, on the next page, under its title again with
+            # "(cont'd)": its text goes on at the end of that entry, and the repeated title is
+            # left out.
+            owner = next((e for c, e in entries if f'{c}/{e["slug"]}' == bp['continues']), None)
+            if owner is None:
+                report['errors'].append(f'box {bid} (p{region["page"]}): the plan says it `continues` '
+                                        f'{bp["continues"]}, which is no entry of the chapter')
+                continue
+            title = bruns[0][1] if bruns[0][0] == 'heading' else []
+            report['left_out'] += [{'page': l['page'], 'text': l['text'],
+                                    'why': f'the title of a panel carrying on {bp["continues"]}, repeated'} for l in title]
+            owner['content'] += read_blocks(bp['continues'], bl[len(title):])
+            continue
         if bruns[0][0] != 'heading' and not bp.get('name'):
             report['errors'].append(f'box {bid} (p{region["page"]}) has no title: give it a name in the plan\'s boxes')
             continue
@@ -724,6 +767,20 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None, skill
         seen[ref] = e['page']
         kinds[ref] = e['fields'].get('kind')
         ep = {} if paged in used_plans else plan.get('entries', {}).get(ref, {})
+        if ep.get('category'):
+            category = ep['category']        # a section that is a reference table: a `tables` entry
+        if ep.get('name') and ep['name'] != e['name']:
+            # named as the book names the table it holds, not by the heading over it ("Lamps"
+            # over the Lamp Table); the heading stays in `printed_name`
+            e['fields']['printed_name'] = e['name']
+            e['name'], e['slug'] = ep['name'], slugify(ep['name'])
+        if ep.get('category') or ep.get('name'):
+            ref = f'{category}/{e["slug"]}'
+            if ref in seen:
+                report['errors'].append(f'{ref}: the plan\'s entries give a second entry of this chapter this '
+                                        f'slug (p{seen[ref]} and p{e["page"]})')
+                continue
+            seen[ref] = e['page']
         if ep.get('slug'):
             e['slug'] = ep['slug']           # the plan gives it a file name of its own
         e['fields'].update(ep.get('fields', {}))
@@ -750,6 +807,8 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None, skill
     for ref in plan.get('entries', {}):
         if ref not in seen and ref not in used_plans:
             report['errors'].append(f'plan entry {ref} matches no entry of the chapter')
+    for ref in set(plan.get('hanging_lists', [])) - used_hanging:
+        report['errors'].append(f'plan hanging_lists: {ref} matches no entry of the chapter')
     for category, _ in out:
         report['counts'][category] = report['counts'].get(category, 0) + 1
     return out, report
