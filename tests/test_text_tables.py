@@ -195,6 +195,29 @@ class TextTableTest(unittest.TestCase):
         self.assertEqual(report['tables'], [{'entry': 'advantages/tide-sense', 'page': 10, 'header': 'Reach Cost',
                                              'columns': ['Reach', 'Cost'], 'rows': block['rows'], 'failures': []}])
 
+    def test_a_heading_line_among_the_rows_starts_a_group(self):
+        t = table([[(70, 'Reed wick'), (150, '1'), (180, 'Smoky')],
+                   [(70, 'Cord wick'), (150, '2'), (180, 'Clean')],
+                   [(70, 'Tallow'), (150, '3'), (180, 'Smoky;')],
+                   [(180, 'Cheap')],                              # its notes carried on to a line of their own
+                   [(70, 'Whale oil'), (150, '5'), (180, 'Clean')]],
+                  [(70, 'Fuel'), (150, 'Hours'), (180, 'Notes')])
+        groups = [line(t[1]['baseline'] - 5.5, [(66, 'Wicks')]), line(t[3]['baseline'] - 5.5, [(66, 'Oils and Fats')])]
+        for g in groups:
+            g['heading'], g['size'] = 10, 10.9
+        rows = [t[1], t[2], groups[1], t[3], t[4], t[5]]
+        columns, cells, _, failures, found = entry_text.read_grouped_table(t[:1], [groups[0]] + rows)
+        self.assertEqual(failures, [])
+        self.assertEqual(columns, ['Fuel', 'Hours', 'Notes'])
+        self.assertEqual(cells, [['Reed wick', '1', 'Smoky'], ['Cord wick', '2', 'Clean'],
+                                 ['Tallow', '3', 'Smoky; Cheap'], ['Whale oil', '5', 'Clean']])
+        self.assertEqual(found, [{'before': 0, 'text': 'Wicks'}, {'before': 2, 'text': 'Oils and Fats'}])
+        block = entry_text.table_block(t[:1], [groups[0]] + rows, {'errors': []}, 'rules/lamps')
+        self.assertEqual(block['groups'], found)
+        # a row before the first group heading belongs to no group: refused, not guessed
+        _, _, _, failures, _ = entry_text.read_grouped_table(t[:1], rows)
+        self.assertTrue(any('before its first group heading' in f for f in failures))
+
     def test_a_header_of_several_words_goes_to_the_column_each_stands_over(self):
         t = table([[(90, '2'), (120, '4'), right(200, '-10%')],
                    [(90, '5'), (120, '10'), right(200, '-20%')]],

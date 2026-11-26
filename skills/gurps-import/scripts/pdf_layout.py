@@ -63,10 +63,13 @@ plain text); its lines carry `table` too. An illustration cut out with a soft ma
 (mostly see-through) is not a panel, even where its rectangle runs over text;
 nor is a rectangle the page's lines run across (a word over its edge, or a line
 carrying on into it, on a quarter of its rows). A box's own lines are read in
-one or two columns, never three: a table's columns aren't text columns. A table set inset
+one or two columns, or three in a box nearly as wide as the page (WIDE_BOX); a table's
+columns aren't text columns. A table set inset
 beside a one-column box's text is read after the paragraph it sits beside (move_insets). A box holding
 several ruled tables, each under its own larger title, is read as one region per table,
-numbered "<box id>.<n>" (216.1.1, 216.1.2).
+numbered "<box id>.<n>" (216.1.1, 216.1.2). A panel set across the page parts the page's text
+into bands above and below it; a band whose words show more columns than the page's (three
+over the panel, two under it) is read in its own, and `image_notes` says so.
 `image_notes` lists each one set aside, and any mask that couldn't be read.
 A drop capital (a letter twice the size of the text beside it, set into the
 lines below its paragraph's first) is moved to the start of that first line and
@@ -93,6 +96,7 @@ from pdfminer.pdffont import PDFSimpleFont
 CASE_FIXED = collections.Counter()
 NOT_BOXES = set()                        # ids of frames that are no panels (--not-boxes)
 SET_GUTTERS = {}                         # printed page -> its gutters, as the plan gives them (--set-gutters)
+BAND_PAGES = set()                       # printed pages read in bands between panels across the page (--band-pages)
 REPLACE_CHARS = {}                       # characters a book's fonts give wrongly -> what the page prints (--replace-chars)
 CHARS_REPLACED = collections.Counter()
 # A glyph whose font gives no character for it comes through as "(cid:129)". It is almost always
@@ -138,7 +142,8 @@ PANEL_OPAQUE = 0.75                      # a masked image less opaque than this 
 TILT_MIN = 0.5                           # degrees: text turned less than this is level
 SCRAP_GAP = 4.0                          # a gap wider than this x the type size parts two tilted notes side by side
 SCRAP_LEADING = 3.0                      # lines further apart than this x the type size are different notes
-HEADING_SHARE = 0.08                     # a larger size used for more than this share of the body's characters is text
+WIDE_BOX = 0.7                           # a box this share of the page's width may be set in three columns
+HEADING_SHARE = 0.08                    # a larger size used for more than this share of the body's characters is text
 
 
 def parse_pages(s):
@@ -1214,8 +1219,33 @@ def page_lines(page, page_no, icon_fonts=(), marks=None, shapes=None, regions=No
             if used_usual is not None:
                 used_usual.append(True)
     full_rows = full_rows - below_the_rows(body, table_regions, gutters, full_rows)
-    out = order_lines(body, gutters, page_no, page.height, full_rows,
-                      table_notes(body, table_regions, gutters, full_rows))
+    notes_under = table_notes(body, table_regions, gutters, full_rows)
+    # A panel set across the page parts its text into bands, above and below it, and a band can
+    # be set in more columns than the rest of the page (three over a panel, two under it). A band
+    # whose own words show more columns than the page's is read in those, each band in turn. So is
+    # a page the plan names (--band-pages): its columns run down to a panel across the page and
+    # start again under it, the text above read before the text below.
+    across_page = sorted(b[1] for i, b in enumerate(boxes) if b[2] - b[0] >= WIDE_BOX * page.width and
+                         f'{page_no}.{i + 1}' not in NOT_BOXES)
+    bands = collections.defaultdict(list)
+    for w in body:
+        bands[sum(1 for top in across_page if top < (w['top'] + w['bottom']) / 2)].append(w)
+    own = {} if page_no in SET_GUTTERS or len(bands) < 2 else \
+        {k: gutters_under_a_standfirst([w for w in ws if id(w) not in hidden and w['top'] >= page.height * MARGIN_TOP and
+                                        w['bottom'] <= page.height * (1 - MARGIN_BOTTOM) and
+                                        max(c['size'] for c in w['chars']) <= usual_size], page.width)
+         for k, ws in bands.items()}
+    if any(len(g) > len(gutters) for g in own.values()) or (own and page_no in BAND_PAGES):
+        out = []
+        for k in sorted(bands):
+            g = own[k] if len(own[k]) > len(gutters) else gutters
+            out += order_lines(bands[k], g, page_no, page.height, full_rows, notes_under)
+        if notes is not None:
+            notes.append({'page': page_no, 'note': 'read in bands parted by panels across the page: ' +
+                          '; '.join(f'band {k + 1}: gutters {[round(x, 1) for x in (own[k] if len(own[k]) > len(gutters) else gutters)]}'
+                                    for k in sorted(bands))})
+    else:
+        out = order_lines(body, gutters, page_no, page.height, full_rows, notes_under)
     keep_run_on(out, page_no, page.height)
     if aside_chars:
         asides = order_lines(make_words(aside_chars, page.height), (), page_no, page.height)
@@ -1229,13 +1259,15 @@ def page_lines(page, page_no, icon_fonts=(), marks=None, shapes=None, regions=No
         if not bw:
             continue
         bid = f'{page_no}.{i + 1}'
-        # A box is one or two columns; a table's columns inside it are not text columns.
+        # A box is one or two columns, or three when it is nearly as wide as the page (a
+        # page's worth of text in a frame); a table's columns inside it are not text columns.
         # ...and a table on a tinted panel has no text columns at all: each row is one line.
-        inner = () if box in panels else find_gutters(bw, box[2] - box[0], box[0], three=False)
+        wide = box[2] - box[0] >= WIDE_BOX * page.width
+        inner = () if box in panels else find_gutters(bw, box[2] - box[0], box[0], three=wide)
         if not inner and box not in panels:
             # A box's columns can sit under a lead-in set across it, as a page's can: columns of
             # three lines or more on each side, not a short last line beside a blank.
-            g = gutters_under_a_standfirst(bw, box[2] - box[0], box[0], three=False)
+            g = gutters_under_a_standfirst(bw, box[2] - box[0], box[0], three=wide)
             if g:
                 by_line = collections.defaultdict(list)
                 for w in bw:
@@ -1338,8 +1370,11 @@ def set_gutters(specs):
 
 
 def read(pdf_path, first, last, offset, icon_fonts=(), boxes=False, icon_text=None, margin_lines=(),
-         aside_fonts=(), icons_alone=False, replace_chars=None, not_boxes=(), usual_gutters=None, set_gutters=None):
+         aside_fonts=(), icons_alone=False, replace_chars=None, not_boxes=(), usual_gutters=None, set_gutters=None,
+         band_pages=()):
     CASE_FIXED.clear()
+    BAND_PAGES.clear()
+    BAND_PAGES.update(band_pages)
     NOT_BOXES.clear()
     NOT_BOXES.update(not_boxes)
     SET_GUTTERS.clear()
@@ -1458,6 +1493,9 @@ def main(argv=None):
     ap.add_argument('--set-gutters', nargs='*', default=[], metavar='PAGES=X,X',
                     help='the gutters of pages whose own blanks mislead (tables side by side, their columns\' '
                          'blanks looking like gutters), by printed page or range: 297-304=305 or 305=none')
+    ap.add_argument('--band-pages', nargs='*', default=[], metavar='PAGES',
+                    help='printed pages, or ranges, whose text a panel or picture across the page parts in two: '
+                         'the columns above it are read before those under it')
     ap.add_argument('--icons-alone', action='store_true',
                     help='with --icon-text: an icon glyph with no text beside it makes a line of its own '
                          '(icons turned over to the line under a heading); otherwise it is left out of the text')
@@ -1482,7 +1520,8 @@ def main(argv=None):
                a.icons_alone, dict(x.split('=', 1) for x in a.replace_chars), a.not_boxes,
                {('even', 'odd').index(k): [float(v) for v in x.split(',')]
                 for k, x in (u.split('=', 1) for u in a.usual_gutters)},
-               set_gutters(a.set_gutters))
+               set_gutters(a.set_gutters),
+               {p for r in a.band_pages for p in range(parse_pages(r)[0], parse_pages(r)[1] + 1)})
     if doc['pages_without_text']:
         print('no text layer on printed pages ' + ', '.join(map(str, doc['pages_without_text'])) +
               ': look at the page images, and ask before running OCR', file=sys.stderr)
@@ -1498,7 +1537,8 @@ def main(argv=None):
             print(f'font {font}: {k} capitals its character map read as lower case, kept as capitals',
                   file=sys.stderr)
         for n in doc['image_notes']:
-            print(f'p{n["page"]} image {n["bbox"]}: {n["note"]}', file=sys.stderr)
+            print(f'p{n["page"]} image {n["bbox"]}: {n["note"]}' if 'bbox' in n else f'p{n["page"]}: {n["note"]}',
+                  file=sys.stderr)
         for n in doc['drop_capitals']:
             print(f'p{n["page"]}: {n["note"]}', file=sys.stderr)
     else:
