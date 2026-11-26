@@ -150,11 +150,12 @@ reader and writer (`gdf.py`, run against every data file on this computer) and
 converter (`convert_traits.py`: traits, skills, spells, templates and
 meta-traits), which reads and checks the tables set in a trait's text, and with
 `equipment_tables.py` the weapon, armor and shield tables, and with
-`creatures.py` creatures' stat blocks.
+`creatures.py` creatures' stat blocks; linking entries to their definitions
+(`link_gca.py`, with the links file in the source's plans).
 
 Not built: converters for rules prose (beyond what the trait converter makes of
-a chapter's other sections) and equipment descriptions; linking
-entries to definitions; writing to character files. `skills/gurps-import/SKILL.md` and
+a chapter's other sections) and equipment descriptions; writing to character
+files. `skills/gurps-import/SKILL.md` and
 `skills/gurps-character-sheet/references/character-files.md` say what each
 needs first.
 

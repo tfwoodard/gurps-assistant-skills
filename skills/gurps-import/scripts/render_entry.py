@@ -11,7 +11,7 @@ import json
 import re
 import sys
 
-FRONT = ('slug', 'name', 'source', 'chapter', 'section', 'page', 'kind', 'audience', 'relations', 'aliases')
+FRONT = ('slug', 'name', 'source', 'chapter', 'section', 'page', 'kind', 'audience', 'relations', 'gca', 'aliases')
 
 
 def yaml_value(v):

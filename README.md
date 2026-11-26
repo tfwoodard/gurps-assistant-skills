@@ -16,11 +16,11 @@ to:
 Words like *source*, *entry*, *chapter*, *data file*, *definition*, *Librarian*,
 and *GM* have specific meanings here; see [`CONTEXT.md`](CONTEXT.md).
 
-**Status: a new project.** The library format, the shared tooling, the GCA data
-file reader and writer and the character file reader are built and tested. No
-first converter (trait write-ups) is built and runs clean on the Basic Set's
-advantages chapter; tables set inside a trait's text, entry-to-GCA linking and
-writing to character files are not built yet.
+**Status.** The library format, the shared tooling, the GCA data file reader and
+writer and the character file reader are built and tested. The converters for
+traits, the tables set in their text, equipment tables and creatures have
+imported the Basic Set, and entries are linked to the definitions of its GCA
+data file (`link_gca.py`). Writing to character files is not built yet.
 
 ## Working with GURPS Character Assistant
 
