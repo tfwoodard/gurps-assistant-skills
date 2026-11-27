@@ -134,6 +134,25 @@ class WriteChapter(unittest.TestCase):
         self.assertIn('words of the pages are in no entry; nothing written', r.stderr)
         self.assertFalse(os.path.exists(os.path.join(self.lib, 'library-data', 'advantages', 'tide-sense.json')))
 
+    def test_an_entry_written_over_a_linked_one_keeps_its_gca_links(self):
+        self.assertEqual(self.write().returncode, 0)
+        links = [{'item': 'AD:Tide Sense', 'file': 'Marsh Lamps 4e.gdf'}]
+        path = os.path.join(self.lib, 'library-data', 'advantages', 'tide-sense.json')
+        entry = self.read('library-data', 'advantages', 'tide-sense.json')
+        entry['gca'] = links
+        self.dump(path, entry)
+        r = self.write()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout)['gca_carried_over'], 1)
+        again = self.read('library-data', 'advantages', 'tide-sense.json')
+        self.assertEqual(again['gca'], links)
+        self.assertEqual(list(again).index('gca'), list(again).index('fields') + 1)
+        with open(path[:-5] + '.md', encoding='utf-8') as f:
+            self.assertIn('gca: [{"item": "AD:Tide Sense"', f.read())
+        rec = next(x for x in self.read('library-data', 'advantages', '_index.json') if x['slug'] == 'tide-sense')
+        self.assertEqual(rec['gca'], links)
+        self.assertNotIn('gca', self.read('library-data', 'advantages', 'webbed-hands.json'))
+
 
 if __name__ == '__main__':
     unittest.main()

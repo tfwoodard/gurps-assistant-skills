@@ -16,7 +16,9 @@ Every category's index and the import log are merged first, in scratch (merge_im
 also says which entries a re-import no longer has); a merge that refuses stops the write with
 nothing in the library changed. Then, in this order: the entry files (over any there already),
 the removal of entries a re-import no longer has, each category's `_index.json`, the import log,
-and last `library.json`, where the chapter becomes `imported`.
+and last `library.json`, where the chapter becomes `imported`. An entry written over one that
+is linked to GCA definitions keeps its `gca` (link_gca.py), in its files and its index record;
+the summary counts them.
 
 `--target` is the library-data folder under ROOT: `library-data` for a library source,
 `campaigns/<slug>/library-data` or `campaigns/<slug>/gm/library-data` for a campaign's (the
@@ -34,6 +36,9 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+from link_gca import with_gca  # noqa: E402
+from render_entry import render  # noqa: E402
 
 
 def load(path):
@@ -110,7 +115,41 @@ def main(argv=None):
     # --- entries, then indexes and the log, then library.json ----------------------------------
     target = os.path.join(a.library, *a.target.split('/'))
     log_path = os.path.join(target, '_import-log.json')
+    records_path = os.path.join(a.out, '_records.json')
     with tempfile.TemporaryDirectory() as tmp:
+        # An entry written over one linked to its GCA definitions keeps the links (layout §6,
+        # "Re-importing"): its .json, .md and index record get the old entry's `gca`.
+        carried, unreadable = {}, []
+        for (cat, slug), base in files.items():
+            old = os.path.join(target, cat, slug + '.json')
+            try:
+                links = load(old).get('gca') if os.path.exists(old) else None
+            except ValueError:
+                unreadable.append(f'{cat}/{slug}')     # said in the summary: no links could be read from it
+                continue
+            if links:
+                entry = load(base + '.json')
+                if entry.get('gca') != links:
+                    entry = with_gca(entry, links)
+                    work = os.path.join(tmp, 'carried', f'{cat}--{slug}')
+                    os.makedirs(os.path.dirname(work), exist_ok=True)
+                    with open(work + '.json', 'w', encoding='utf-8', newline='\n') as f:
+                        f.write(json.dumps(entry, ensure_ascii=False, indent=1) + '\n')
+                    with open(work + '.md', 'w', encoding='utf-8', newline='\n') as f:
+                        f.write(render(entry))
+                    files[(cat, slug)] = work
+                carried[(cat, slug)] = links
+        if carried:
+            for r in records:
+                if (r['_category'], r['slug']) in carried:
+                    r['gca'] = carried[(r['_category'], r['slug'])]
+            records_path = os.path.join(tmp, '_records.json')
+            with open(records_path, 'w', encoding='utf-8', newline='\n') as f:
+                json.dump(records, f, ensure_ascii=False, indent=1)
+                f.write('\n')
+        summary['gca_carried_over'] = len(carried)
+        if unreadable:
+            summary['old_entries_not_json'] = unreadable
         # Pass 1: every merge, into scratch, before anything in the library is touched. A merge
         # that refuses (a slug another chapter holds, say) stops the write with nothing changed.
         log_in = log_path
@@ -124,7 +163,7 @@ def main(argv=None):
             mine = sorted(slug for c, slug in files if c == cat)
             work = os.path.join(tmp, cat)
             cmd = [sys.executable, os.path.join(HERE, 'merge_import.py'), '--out', work,
-                   '--records', os.path.join(a.out, '_records.json'), '--edition', edition,
+                   '--records', records_path, '--edition', edition,
                    '--source', a.source, '--chapter', a.chapter, '--category', cat, '--date', date,
                    '--log-notes', a.notes, '--log', log_in]
             if os.path.exists(index_path):

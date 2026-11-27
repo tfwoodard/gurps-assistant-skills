@@ -414,9 +414,34 @@ shown to the Librarian in three lists, every time, none of them left out:
 Write the confirmed links to each entry's `gca`, render its `.md` again, and
 update its index line.
 
-There is no script for this yet: it needs real entries to be built against.
-Build it (`link_gca.py`, with tests on invented entries and an invented data
-file) when the first chapter of traits is imported.
+`scripts/link_gca.py` does this (its docstring has the details):
+
+```
+python scripts/link_gca.py --library <root> --source B --report scratch/link-report.json
+python scripts/link_gca.py --library <root> --source B --write
+```
+
+The first run writes nothing: it prints counts, the three lists and what
+couldn't be compared, and the report holds every entry's links and
+proposals. Each proposal has a kind (`runs-on`, `singular`, `pointer`,
+`other-page`, `no-page`, `other-section`, `on-page`). Show the Librarian a
+few of each kind beside the pages they cite, and record what they confirm
+in `sources/<code>/plans/links.json`: `links` for an entry's definitions,
+`none` for an entry with none (and why), `not_entries` for a definition with
+no entry (and why), and `accept` for a kind confirmed as a whole. Then run
+with `--write`. A links file naming an entry or definition that isn't there
+stops the run with nothing written.
+
+Pairs whose costs differ are faults in the data file, the book or the
+import, or a rule the comparison can't see (an optional specialty a step
+easier, a variant at half cost): check each against the page with the
+Librarian. Those the rules explain go in the links file's `costs_explained`
+with their reason, and are listed apart from then on; keep the data file's
+faults in a list for its maintainers (layout §12); never correct the
+published file.
+
+Writing a chapter again (`write_chapter.py`) keeps each entry's links. Run
+the linker again afterwards: an entry whose name changed may need new ones.
 
 ### Generate a data file
 

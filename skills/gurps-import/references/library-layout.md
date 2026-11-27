@@ -766,11 +766,18 @@ An entry's `gca` is a list of the definitions that build it:
 
 One entry often has several (a skill's specialties, an advantage GCA splits
 into variants) and some have none (rules prose; a trait no data file covers
-yet). The link is proposed by matching names and the definition's `page()` tag
-against the entry's page, and anything not matched exactly is shown to the
-Librarian. Three lists come out of every linking run and are reported, never
-hidden: entries with no definition, definitions with no entry, and pairs whose
-printed cost and data file cost disagree.
+yet). A modifier's link also names its `group`, GCA's category for it, since
+one name can be in many groups:
+`{ "item": "Accurate", "group": "_Attack Enhancements", "file": "..." }`.
+
+`gurps-import/scripts/link_gca.py` makes the links. A definition of the
+entry's name whose `page()` cites the entry's page is linked at once; anything
+else is a proposal, shown to the Librarian, and linked only once
+`sources/<code>/plans/links.json` confirms it (entry by entry, or every
+proposal of one kind), so linking again gives the same links. Three lists come
+out of every linking run and are reported, never hidden: entries with no
+definition, definitions with no entry, and pairs whose printed cost and data
+file cost disagree.
 
 To use a definition, read it from `gca/parsed/` and then apply the commands of
 the campaign's later data files (§8 `gca.data_files`) that name it. Say so
