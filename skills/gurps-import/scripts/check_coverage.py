@@ -9,7 +9,8 @@ OUT_DIR (each <slug>.json's name and content, and a trapping's printed
 fields: its price, damage, group and so on), plus the strings its
 `_report.json` lists under `left_out` (art credits, captions, anything left out
 on purpose), the words it joined across a line end (`dehyphenated`) and the
-copies of a joined table's key column (`folded_keys`, counted and said). A word
+copies of a joined table's key column (`folded_keys`, counted and said), and the
+words a reader split where the page printed two with no space (`words_split`, said). A word
 the pages have more often than the output is listed with
 the line it came from. Exit status 1 when any word is missing.
 
@@ -98,6 +99,9 @@ def main(argv=None):
                 got.update(words(s if isinstance(s, str) else s.get('text', '')))
             for d in data.get('dehyphenated', []):     # printed split over two lines, joined in the entry
                 got.update(words(d['from']))
+            for d in data.get('words_split', []):      # printed run together with no space, split in the entry
+                print(f'credited: {d["word"]!r} ({d["entry"]}), split into {d["into"]}: {d["why"]} (words_split)')
+                got.update(words(d['word']))
             for d in data.get('folded_keys', []):      # a key column printed once per part, kept once
                 n = sum(len(words(c)) for c in d['cells'])
                 print(f'credited: {n} words of {d["region"]} ({d["entry"]}): its key column, printed '
