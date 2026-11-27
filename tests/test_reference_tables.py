@@ -157,6 +157,24 @@ def draw_banded_page(path, columns_below=2):
     c.save()
 
 
+def draw_heading_banded_page(path):
+    """Three columns of text, a large heading set across the page, and three more columns under it."""
+    c = canvas.Canvas(path, pagesize=A4)
+    w, h = A4
+    c.setFont('Helvetica', 9)
+    for k in range(6):
+        for n, x in enumerate((60, 225, 390)):
+            c.drawString(x, h - 100 - 11 * k, f'Upper {n + 1} words.')
+    c.setFont('Helvetica-Bold', 30)
+    c.drawCentredString(w / 2, h - 200, 'LANTERNS AT DUSK')
+    c.setFont('Helvetica', 9)
+    for k in range(12):
+        for n, x in enumerate((60, 225, 390)):
+            c.drawString(x, h - 240 - 11 * k, f'Lower {n + 1} words.')
+    c.showPage()
+    c.save()
+
+
 def read_layout(pdf, *extra):
     with tempfile.TemporaryDirectory() as d:
         out = os.path.join(d, 'layout.json')
@@ -204,6 +222,16 @@ class BandedPageTest(unittest.TestCase):
         self.assertEqual(first(whole), ['Reeds bend.'] * 4 + ['Column 1 text below.'] * 2)
         # read in bands, the three short columns over the frame come first
         self.assertEqual(first(banded), ['Reeds bend.'] * 4 + ['Gulls cry.'] * 2)
+
+    def test_a_heading_across_the_columns_parts_the_page_into_bands(self):
+        with tempfile.TemporaryDirectory() as d:
+            pdf = os.path.join(d, 'page.pdf')
+            draw_heading_banded_page(pdf)
+            doc = read_layout(pdf)
+        texts = [l['text'] for l in doc['lines'] if not l.get('box') and not l.get('furniture')]
+        self.assertEqual(texts, [f'Upper {n} words.' for n in (1, 2, 3) for _ in range(6)] + ['LANTERNS AT DUSK'] +
+                         [f'Lower {n} words.' for n in (1, 2, 3) for _ in range(12)])
+        self.assertTrue(any('headings across the page' in n.get('note', '') for n in doc['image_notes']))
 
 
 if __name__ == '__main__':

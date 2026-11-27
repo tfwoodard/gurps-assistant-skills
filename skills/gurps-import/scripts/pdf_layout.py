@@ -69,7 +69,10 @@ beside a one-column box's text is read after the paragraph it sits beside (move_
 several ruled tables, each under its own larger title, is read as one region per table,
 numbered "<box id>.<n>" (216.1.1, 216.1.2). A panel set across the page parts the page's text
 into bands above and below it; a band whose words show more columns than the page's (three
-over the panel, two under it) is read in its own, and `image_notes` says so.
+over the panel, two under it) is read in its own, and `image_notes` says so. A heading set
+across the columns, below other text, parts the page the same way: the columns above it end
+there and start again under it (an appendix whose sections each open with a heading across
+the page).
 `image_notes` lists each one set aside, and any mask that couldn't be read.
 A drop capital (a letter twice the size of the text beside it, set into the
 lines below its paragraph's first) is moved to the start of that first line and
@@ -1227,21 +1230,29 @@ def page_lines(page, page_no, icon_fonts=(), marks=None, shapes=None, regions=No
     # start again under it, the text above read before the text below.
     across_page = sorted(b[1] for i, b in enumerate(boxes) if b[2] - b[0] >= WIDE_BOX * page.width and
                          f'{page_no}.{i + 1}' not in NOT_BOXES)
+    # A heading set across the columns, below the page's top, parts it the same way: the columns
+    # above it end there, and the text under it starts its columns again.
+    heading_tops = sorted({round(w['top'], 1) for w in body if gutters and max(c['size'] for c in w['chars']) > usual_size
+                           and any(w['x0'] < g - 1 and w['x1'] > g + 1 for g in gutters)
+                           and page.height * MARGIN_TOP <= w['top'] and w['bottom'] <= page.height * (1 - MARGIN_BOTTOM)
+                           and any(v['top'] < w['top'] - 1 and id(v) not in hidden and
+                                   max(c['size'] for c in v['chars']) <= usual_size for v in body)})
+    dividers = sorted(across_page + [t - 0.5 for t in heading_tops])
     bands = collections.defaultdict(list)
     for w in body:
-        bands[sum(1 for top in across_page if top < (w['top'] + w['bottom']) / 2)].append(w)
+        bands[sum(1 for top in dividers if top < (w['top'] + w['bottom']) / 2)].append(w)
     own = {} if page_no in SET_GUTTERS or len(bands) < 2 else \
         {k: gutters_under_a_standfirst([w for w in ws if id(w) not in hidden and w['top'] >= page.height * MARGIN_TOP and
                                         w['bottom'] <= page.height * (1 - MARGIN_BOTTOM) and
                                         max(c['size'] for c in w['chars']) <= usual_size], page.width)
          for k, ws in bands.items()}
-    if any(len(g) > len(gutters) for g in own.values()) or (own and page_no in BAND_PAGES):
+    if any(len(g) > len(gutters) for g in own.values()) or (own and (page_no in BAND_PAGES or heading_tops)):
         out = []
         for k in sorted(bands):
             g = own[k] if len(own[k]) > len(gutters) else gutters
             out += order_lines(bands[k], g, page_no, page.height, full_rows, notes_under)
         if notes is not None:
-            notes.append({'page': page_no, 'note': 'read in bands parted by panels across the page: ' +
+            notes.append({'page': page_no, 'note': 'read in bands parted by panels or headings across the page: ' +
                           '; '.join(f'band {k + 1}: gutters {[round(x, 1) for x in (own[k] if len(own[k]) > len(gutters) else gutters)]}'
                                     for k in sorted(bands))})
     else:
