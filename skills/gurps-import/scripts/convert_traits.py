@@ -129,6 +129,7 @@ from entry_text import (FOOTNOTE_MARK, SMALL_WORDS, blocks_from_lines, fix_case,
                         with_text_tables)
 from render_entry import render  # noqa: E402
 from equipment_tables import take_tables  # noqa: E402
+from trait_lists import take_lists  # noqa: E402
 import creatures  # noqa: E402
 
 # fields that hold words printed on the page
@@ -252,6 +253,9 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None, skill
     # the equipment tables the plan names: entries of their own, out of the text
     lines, table_entries = take_tables(lines, plan, report, vocab, source, chapter, layout.get('regions', []),
                                        skill_lookup)
+    # the trait lists the plan names (a book's summary tables of its traits): entries of their own
+    lines, list_entries = take_lists(lines, plan, report, vocab, source, chapter)
+    table_entries += list_entries
     if plan.get('indent', True):
         mark_paragraphs(lines)
     body = [l for l in lines if not l.get('box')]
