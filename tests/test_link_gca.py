@@ -40,6 +40,7 @@ Lantern (Glass), IQ/E, page(ML21)
 [Modifiers]
 <_General>
 Bright, +20%, page(ML40)
+Bright: Dim glow, +20%, page(ML40)
 Steady, +10%/+20%, page(ML41)
 <Tide Sense>
 Bright, +10%, page(ML12)
@@ -124,8 +125,10 @@ class LinkGca(unittest.TestCase):
         # a skill that takes specialties gets each of them, but not one another entry is named for
         self.assertEqual(items('skills/lantern'), ['SK:Lantern (Oil)', 'SK:Lantern (Glass)'])
         self.assertEqual(items('skills/lantern-gas'), ['SK:Lantern (Gas)'])
-        # a modifier's link names its group, and the same name in another group is not taken
-        self.assertEqual(rep['links']['modifiers/bright'], [{'item': 'Bright', 'group': '_General', 'file': FILE}])
+        # a modifier's link names its group, and the same name in another group is not taken; a variant
+        # named "Bright: Dim glow" is the modifier's as "Bright (Dim glow)" would be
+        self.assertEqual(rep['links']['modifiers/bright'], [{'item': 'Bright', 'group': '_General', 'file': FILE},
+                                                            {'item': 'Bright: Dim glow', 'group': '_General', 'file': FILE}])
         proposed = {x['entry']: [(p['kind'], p['item']) for p in x['proposals']] for x in rep['no_definition']}
         self.assertEqual(proposed, {'advantages/reed-friends': [('singular', 'AD:Reed Friend')],
                                     'advantages/fog-sight': [('runs-on', 'AD:Fog Sight')],
@@ -156,6 +159,23 @@ class LinkGca(unittest.TestCase):
         self.assertEqual(rep['no_definition'], [])
         self.assertEqual([x['item'] for x in rep['no_entry']], ['Bright'])
         self.assertEqual(rep['no_entry_known'][0]['why'], 'from another book')
+
+    def test_an_accepted_pointer_takes_only_definitions_no_other_entry_holds(self):
+        r, rep = self.run_it({'accept': ['pointer']})
+        self.assertEqual((rep['how']['advantages/keeper-rank'], rep['pointers_to_linked']), ('accepted', []))
+        # the write-up the pointer points to, in another chapter, takes the definition first
+        index = self.read('library-data/advantages/_index.json').rstrip().rstrip(']').rstrip()
+        rec = {'slug': 'keeper-rank-write-up', 'name': 'Keeper Rank', 'source': 'ML', 'chapter': 'ch1',
+               'section': 'Keeper Rank', 'page': 9, 'cost': '5 points/level', 'edition': '4e'}
+        with open(os.path.join(self.lib, 'library-data', 'advantages', '_index.json'), 'w', encoding='utf-8') as f:
+            f.write(index + ',\n  ' + json.dumps(rec) + '\n]\n')
+        r, rep = self.run_it({'accept': ['pointer']})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(rep['how']['advantages/keeper-rank-write-up'], 'exact')
+        self.assertEqual(rep['how']['advantages/keeper-rank'], 'pointer')
+        self.assertEqual(rep['pointers_to_linked'], [{'entry': 'advantages/keeper-rank', 'items': ['AD:Keeper Rank']}])
+        self.assertNotIn('advantages/keeper-rank', [x['entry'] for x in rep['no_definition']])
+        self.assertEqual(rep['claimed_twice'], [])
 
     def test_a_links_file_naming_what_isnt_there_is_an_error_and_nothing_is_written(self):
         r, rep = self.run_it({'links': {'advantages/no-such': ['AD:Tide Sense'], 'skills/punting': ['SK:Sculling']},

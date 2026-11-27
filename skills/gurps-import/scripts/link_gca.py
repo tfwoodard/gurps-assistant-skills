@@ -21,7 +21,9 @@ An entry is linked in one of two ways:
              Librarian's: what they confirmed, kept so a re-run gives the same links.
 
 Everything else that may be it is a **proposal**, with its kind, and is never written until the
-links file confirms it, by entry or by kind (`accept`):
+links file confirms it, by entry or by kind (`accept`: an entry whose proposals are all of an
+accepted kind takes them; an accepted `pointer` takes only the definitions no other entry holds,
+and a pointer left with none is counted as `pointer`, its write-up holding the link):
 
   runs-on        the name, cited on a later page the entry's write-up runs on to (up to the page
                  the category's next entry starts on)
@@ -134,6 +136,9 @@ class Definition:
         self.page = self.tags.get('page', '')
         self.pages = cited(self.page)
         self.helper = self.name.startswith('_')
+        # GCA names a modifier's variants "Delay: Fixed" or "Unreliable/Activation" as well as "Name (ext)"
+        self.bases = [self.name] + ([b for b in (self.name.split(': ')[0], self.name.split('/')[0])
+                                     if b != self.name] if self.category == 'modifiers' else [])
 
     @property
     def key(self):
@@ -274,7 +279,8 @@ def link(entries, defs, links_file, source):
             twice.append(d.show())
             continue
         seen[d.key] = d
-        by_name[(d.category, norm(d.name))].append(d)
+        for b in dict.fromkeys(norm(x) for x in d.bases):
+            by_name[(d.category, b)].append(d)
         full[(d.category, norm(d.item.split(':', 1)[1] if ':' in d.item else d.item))].append(d)
         any_section[norm(d.name)].append(d)
     unique = list(seen.values())
@@ -362,12 +368,23 @@ def link(entries, defs, links_file, source):
             w = words(e['name'])
             near = [d for d in unique if d.category == cat and d.key not in claimed and not d.helper
                     and any(b == source and page <= p <= span[r] for b, p in d.pages)]
-            props += [('singular', d) for d in near if words(d.name) == w and norm(d.name) != n]
-            props += [('on-page', d) for d in near if (source, page) in d.pages and w & words(d.name)
-                      and words(d.name) != w]
+            alike = lambda d: any(words(b) == w and norm(b) != n for b in d.bases)
+            props += [('singular', d) for d in near if alike(d)]
+            props += [('on-page', d) for d in near if (source, page) in d.pages and w & words(d.name) and not alike(d)]
         proposals[r] = props
-        taken = [d for k, d in props if k in accept]
-        if taken and len({k for k, _ in props}) == 1:
+    # a kind the links file accepts links an entry whose proposals are all of that kind; a pointer
+    # takes only the definitions no other entry holds (its write-up's entry comes first), last
+    pointed_to_linked = []
+    for pointers in (False, True):
+        for r, props in proposals.items():
+            kinds = {k for k, _ in props}
+            if not props or len(kinds) != 1 or (kinds == {'pointer'}) != pointers or not kinds <= accept:
+                continue
+            taken = [d for _, d in props if not (pointers and claimed.get(d.key))]
+            if not taken:
+                pointed_to_linked.append({'entry': r, 'items': [d.item for _, d in props]})
+                how[r] = 'pointer'
+                continue
             linked[r], how[r] = taken, 'accepted'
             for d in taken:
                 claimed[d.key].append(r)
@@ -418,8 +435,9 @@ def link(entries, defs, links_file, source):
         'how': how,
         'no_definition': [{'entry': r, 'name': refs[r]['name'], 'page': refs[r]['page'],
                            'proposals': [dict(d.show(), kind=k) for k, d in proposals.get(r, [])]}
-                          for r in refs if r not in linked],
+                          for r in refs if r not in linked and how.get(r) != 'pointer'],
         'said_to_have_none': [{'entry': r, 'why': none[r]} for r in none if r in refs],
+        'pointers_to_linked': pointed_to_linked,
         'no_entry': no_entry,
         'no_entry_known': known,
         'helpers': helpers,
@@ -488,12 +506,13 @@ def summary(report):
     lines = []
     for cat, c in sorted(report['counts'].items()):
         lines.append(f'{cat}: {c["entries"]} entries: ' + ', '.join(f'{c[k]} {k}' for k in
-                     ('exact', 'confirmed', 'accepted', 'none', 'unlinked') if c.get(k)))
+                     ('exact', 'confirmed', 'accepted', 'pointer', 'none', 'unlinked') if c.get(k)))
     kinds = collections.Counter(p['kind'] for x in report['no_definition'] for p in x['proposals'])
     bare = sum(1 for x in report['no_definition'] if not x['proposals'])
     lines.append(f'entries with no definition: {len(report["no_definition"])} ({bare} with no proposal; proposals: '
                  + (', '.join(f'{n} {k}' for k, n in kinds.most_common()) or 'none') + ')')
     lines.append(f'entries said to have none: {len(report["said_to_have_none"])}')
+    lines.append(f'pointers whose write-up holds their definitions: {len(report["pointers_to_linked"])}')
     lines.append(f'definitions with no entry: {len(report["no_entry"])}, and {len(report["no_entry_known"])} the '
                  f'links file explains, and {report["helpers"]} GCA helper items')
     why = collections.Counter((d['category'], d['why']) for d in report['no_entry'])
