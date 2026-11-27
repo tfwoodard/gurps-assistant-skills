@@ -433,8 +433,12 @@ with `--write`. A links file naming an entry or definition that isn't there
 stops the run with nothing written.
 
 Pairs whose costs differ are faults in the data file, the book or the
-import: check each against the page, and keep the data file's ones in a list
-for its maintainers (layout §12); never correct the published file.
+import, or a rule the comparison can't see (an optional specialty a step
+easier, a variant at half cost): check each against the page with the
+Librarian. Those the rules explain go in the links file's `costs_explained`
+with their reason, and are listed apart from then on; keep the data file's
+faults in a list for its maintainers (layout §12); never correct the
+published file.
 
 Writing a chapter again (`write_chapter.py`) keeps each entry's links. Run
 the linker again afterwards: an entry whose name changed may need new ones.

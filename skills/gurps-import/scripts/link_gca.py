@@ -48,7 +48,12 @@ The links file (`sources/<code>/plans/links.json`):
                "modifiers/accurate": [{"item": "Accurate", "group": "Enhancements"}]},
      "none": {"advantages/cybernetics": "the data file defines each implant as its own trait"},
      "not_entries": {"AD:Extra ST": "an attribute GCA keeps as an advantage"},
-     "accept": ["runs-on"]}
+     "accept": ["runs-on"],
+     "costs_explained": [{"entry": "skills/lantern", "item": "SK:Lantern (Glass)",
+                          "why": "an optional specialty is a step easier"}]}
+
+`costs_explained` holds differences the Librarian has checked against the rules: they are listed
+apart, with their reason, every run; one that no longer differs is listed too.
 
 A modifier is named with its group (GCA files modifiers by group, and one name can be in many).
 
@@ -422,6 +427,22 @@ def link(entries, defs, links_file, source):
             elif not got[0]:
                 differ.append({'entry': r, 'item': d.item, **({'group': d.group} if d.group else {}),
                                'printed': got[1], 'data_file': got[2]})
+    # differences the Librarian has checked against the rules, listed apart with their reason
+    explained_by = {}
+    for x in links_file.get('costs_explained', []):
+        k = (x.get('entry'), x.get('item'), x.get('group', ''))
+        if not x.get('why'):
+            errors.append(f'links file costs_explained: {k[0]} {k[1]!r} gives no why')
+        explained_by[k] = x.get('why', '')
+    explained, unexplained, used_why = [], [], set()
+    for x in differ:
+        k = (x['entry'], x['item'], x.get('group', ''))
+        if k in explained_by:
+            explained.append(dict(x, why=explained_by[k]))
+            used_why.add(k)
+        else:
+            unexplained.append(x)
+    stale = [{'entry': k[0], 'item': k[1], **({'group': k[2]} if k[2] else {})} for k in explained_by if k not in used_why]
 
     counts = {}
     for e in entries:
@@ -441,7 +462,9 @@ def link(entries, defs, links_file, source):
         'no_entry': no_entry,
         'no_entry_known': known,
         'helpers': helpers,
-        'costs_differ': differ,
+        'costs_differ': unexplained,
+        'costs_explained': explained,
+        'explained_but_not_differing': stale,
         'not_compared': dict(not_compared),
         'claimed_twice': [{'item': k[1], **({'group': k[2]} if k[2] else {}), 'entries': v}
                           for k, v in claimed.items() if len(v) > 1],
@@ -517,7 +540,11 @@ def summary(report):
                  f'links file explains, and {report["helpers"]} GCA helper items')
     why = collections.Counter((d['category'], d['why']) for d in report['no_entry'])
     lines += [f'  {n} {cat}: {w}' for (cat, w), n in sorted(why.items())]
-    lines.append(f'pairs whose costs differ: {len(report["costs_differ"])}')
+    lines.append(f'pairs whose costs differ: {len(report["costs_differ"])}, and {len(report["costs_explained"])} '
+                 f'the links file explains')
+    if report['explained_but_not_differing']:
+        lines.append(f'explained in the links file but no longer differing (or no longer linked): '
+                     f'{len(report["explained_but_not_differing"])}')
     lines.append(f'pairs not compared: {sum(report["not_compared"].values())}' +
                  ''.join(f'\n  {n} {why}' for why, n in sorted(report['not_compared'].items(), key=lambda x: -x[1])))
     lines.append(f'definitions two entries claim: {len(report["claimed_twice"])}')

@@ -149,6 +149,17 @@ class LinkGca(unittest.TestCase):
         # nothing here is left uncompared
         self.assertEqual(rep['not_compared'], {})
 
+    def test_a_cost_difference_the_links_file_explains_is_listed_apart_with_its_reason(self):
+        why = 'an optional specialty is a step easier'
+        r, rep = self.run_it({'costs_explained': [
+            {'entry': 'skills/lantern', 'item': 'SK:Lantern (Glass)', 'why': why},
+            {'entry': 'skills/punting', 'item': 'SK:Punting', 'why': 'once differed'}]})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual([x['entry'] for x in rep['costs_differ']], ['advantages/wick-craft'])
+        self.assertEqual([(x['item'], x['why']) for x in rep['costs_explained']], [('SK:Lantern (Glass)', why)])
+        self.assertEqual(rep['explained_but_not_differing'], [{'entry': 'skills/punting', 'item': 'SK:Punting'}])
+        self.assertIn('pairs whose costs differ: 1, and 1 the links file explains', r.stdout)
+
     def test_the_links_file_confirms_links_by_entry_or_by_kind(self):
         r, rep = self.run_it({'links': {'advantages/keeper-rank': ['AD:Keeper Rank']},
                               'accept': ['runs-on', 'singular'],
