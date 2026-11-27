@@ -1116,6 +1116,35 @@ def quote_sources(quote_chars, chars):
     return found
 
 
+def sheet_words(page, page_no):
+    """A filled-in form (--sheet-pages: a character sheet) -> its words, each with its position, type
+    size and font, for a reader that knows the form (character_sheets.py): the printed labels and
+    the values written in beside them are told apart by font, and the form's fields by position,
+    not by reading order. Words in the bottom margin (the page's running foot) are furniture."""
+    chars = []
+    for c in page.chars:
+        if c['text'] in REPLACE_CHARS:
+            CHARS_REPLACED[c['text']] += 1
+            c = dict(c, text=REPLACE_CHARS[c['text']])
+        elif UNMAPPED_GLYPH.match(c['text']):
+            UNMAPPED.setdefault((c['text'], font_name(c.get('fontname', ''))), []).append(page_no)
+        if not c['text'].isspace():
+            chars.append(c)
+    # Each font's words apart: a value is written over the form's rules and against its brackets,
+    # and must not join them.
+    by_font = collections.defaultdict(list)
+    for c in chars:
+        by_font[font_name(c.get('fontname', ''))].append(c)
+    out = []
+    for font, cs in sorted(by_font.items()):
+        for w in make_words(cs, page.height, page_no):
+            out.append({'page': page_no, 'text': w['text'], 'x0': round(w['x0'], 1), 'x1': round(w['x1'], 1),
+                        'top': round(w['top'], 1), 'bottom': round(w['bottom'], 1),
+                        'size': round(max(c['size'] for c in w['chars']), 1), 'font': font,
+                        'furniture': w['top'] > page.height * (1 - MARGIN_BOTTOM)})
+    return sorted(out, key=lambda w: (w['top'], w['x0']))
+
+
 def page_lines(page, page_no, icon_fonts=(), marks=None, shapes=None, regions=None, icon_text=None,
                notes=None, drops=None, aside_fonts=(), usual=None, used_usual=None, icons_alone=False):
     """One page -> (lines in reading order, gutter x or None). Icon glyphs go to `marks`, small
@@ -1382,7 +1411,7 @@ def set_gutters(specs):
 
 def read(pdf_path, first, last, offset, icon_fonts=(), boxes=False, icon_text=None, margin_lines=(),
          aside_fonts=(), icons_alone=False, replace_chars=None, not_boxes=(), usual_gutters=None, set_gutters=None,
-         band_pages=()):
+         band_pages=(), sheet_pages=()):
     CASE_FIXED.clear()
     BAND_PAGES.clear()
     BAND_PAGES.update(band_pages)
@@ -1409,7 +1438,10 @@ def read(pdf_path, first, last, offset, icon_fonts=(), boxes=False, icon_text=No
             r['case'] = collections.Counter(CASE_FIXED)
             return r
 
-        pages = {p: one(p) for p in range(first, last + 1)}
+        # filled-in forms (character sheets): their words, for a reader that knows the form
+        sheets = [{'page': p, 'words': sheet_words(pdf.pages[p + offset - 1], p)}
+                  for p in range(first, last + 1) if p in sheet_pages]
+        pages = {p: one(p) for p in range(first, last + 1) if p not in sheet_pages}
         # The book's usual columns: the gutters most of these pages show. A page that shows fewer
         # (a panel or a picture fills most of a column, so too few words stand in it to count)
         # is read again with the usual ones, where its own words leave them clear.
@@ -1462,6 +1494,7 @@ def read(pdf_path, first, last, offset, icon_fonts=(), boxes=False, icon_text=No
             'gutters': gutters, 'gutter_notes': gutter_notes, 'pages_without_text': empty, 'lines': lines,
             'marks': marks, 'shapes': shapes,
             'regions': regions, 'image_notes': notes, 'drop_capitals': drops, 'case_fixed': dict(CASE_FIXED),
+            'sheets': sheets,
             'chars_replaced': {f'{k}={REPLACE_CHARS[k]}': n for k, n in CHARS_REPLACED.items()},
             'unmapped_glyphs': [{'glyph': g, 'font': f, 'count': len(ps), 'first_page': ps[0]}
                                 for (g, f), ps in sorted(UNMAPPED.items())]}
@@ -1507,6 +1540,9 @@ def main(argv=None):
     ap.add_argument('--band-pages', nargs='*', default=[], metavar='PAGES',
                     help='printed pages, or ranges, whose text a panel or picture across the page parts in two: '
                          'the columns above it are read before those under it')
+    ap.add_argument('--sheet-pages', nargs='*', default=[], metavar='PAGES',
+                    help='printed pages, or ranges, that are filled-in forms (character sheets): their words go '
+                         'to `sheets`, with position and font, and none to `lines`')
     ap.add_argument('--icons-alone', action='store_true',
                     help='with --icon-text: an icon glyph with no text beside it makes a line of its own '
                          '(icons turned over to the line under a heading); otherwise it is left out of the text')
@@ -1532,7 +1568,8 @@ def main(argv=None):
                {('even', 'odd').index(k): [float(v) for v in x.split(',')]
                 for k, x in (u.split('=', 1) for u in a.usual_gutters)},
                set_gutters(a.set_gutters),
-               {p for r in a.band_pages for p in range(parse_pages(r)[0], parse_pages(r)[1] + 1)})
+               {p for r in a.band_pages for p in range(parse_pages(r)[0], parse_pages(r)[1] + 1)},
+               {p for r in a.sheet_pages for p in range(parse_pages(r)[0], parse_pages(r)[1] + 1)})
     if doc['pages_without_text']:
         print('no text layer on printed pages ' + ', '.join(map(str, doc['pages_without_text'])) +
               ': look at the page images, and ask before running OCR', file=sys.stderr)
