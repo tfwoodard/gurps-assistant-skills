@@ -130,6 +130,7 @@ from entry_text import (FOOTNOTE_MARK, SMALL_WORDS, blocks_from_lines, fix_case,
 from render_entry import render  # noqa: E402
 from equipment_tables import take_tables  # noqa: E402
 from trait_lists import take_lists  # noqa: E402
+from character_sheets import attach_sheets, read_points_summary  # noqa: E402
 import creatures  # noqa: E402
 
 # fields that hold words printed on the page
@@ -512,6 +513,10 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None, skill
                 category = t.get('categories', {}).get(name) or \
                     ('disadvantages' if re.match(r'^\s*[-−–]', cost or '') else 'advantages')
                 fields['kind'] = {'advantages': 'advantage', 'disadvantages': 'disadvantage'}.get(category, fields['kind'])
+                if category == 'templates' and 'cost' in fields:
+                    # a template among the traits (a character's alternate form): its line is its points
+                    fields['points'] = fields.pop('cost')
+                    fields.pop('leveled', None)
             entry = add(category, name, name_run[0], title, fields, rest, name_run[0].get('heading', level + 1),
                         t.get('name_size', name_size), again)
             # labelled paragraphs the list gives each trait ("Defaults: IQ-5 or ..."): fields too,
@@ -572,11 +577,30 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None, skill
                                 f'headings found: ' + '; '.join(f'p{runs[i][1][0]["page"]} {fix_case(heading_text(runs[i][1]))}' for i in section_at))
 
     # --- boxes -------------------------------------------------------------------------------
+    # a Points Summary's figures printed in a panel of their own, read with the summary's labels
+    summary_values = {bp['values'] for bp in box_plans.values() if bp.get('points_summary') and bp.get('values')}
     for region in layout.get('regions', []):
         bid = region['id']
         bl = [l for l in lines if l.get('box') == bid]
         bp = box_plans.get(bid, {})
-        if not bl:
+        if not bl or bid in summary_values:
+            continue
+        if bp.get('points_summary'):
+            # a character's Points Summary: a table of its categories and points, in its entry
+            target = bp['points_summary']
+            owner = next((e for c, e in entries if f'{c}/{e["slug"]}' == target), None)
+            values = [l for l in lines if bp.get('values') and l.get('box') == bp['values']]
+            rows, joins, fails = read_points_summary(bl + values)
+            if owner is None or fails:
+                report['errors'].append(f'box {bid} (p{region["page"]}): points summary ' +
+                                        (f'for {target}, which is no entry of the chapter' if owner is None
+                                         else 'not read: ' + '; '.join(fails)))
+                continue
+            owner['content'].append({'type': 'table', 'title': 'Points Summary', 'columns': ['Category', 'Points'],
+                                     'rows': rows, 'data': [{'category': c, 'points': p} if p else {'category': c}
+                                                            for c, p in rows]})
+            for printed, read in joins:
+                report.setdefault('spaced_joined', []).append({'entry': target, 'from': printed, 'into': read})
             continue
         if bp.get('leave_out'):
             report['left_out'] += [{'page': l['page'], 'text': l['text'], 'why': bp['leave_out']} for l in bl]
@@ -813,6 +837,8 @@ def convert_chapter(layout, plan, taken=None, words=None, dictionary=None, skill
             report['errors'].append(f'plan entry {ref} matches no entry of the chapter')
     for ref in set(plan.get('hanging_lists', [])) - used_hanging:
         report['errors'].append(f'plan hanging_lists: {ref} matches no entry of the chapter')
+    # filled-in character sheets (the layout's `sheets`): each read into the entry the plan names
+    attach_sheets(out, plan, layout, report)
     for category, _ in out:
         report['counts'][category] = report['counts'].get(category, 0) + 1
     return out, report

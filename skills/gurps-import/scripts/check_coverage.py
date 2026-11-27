@@ -4,7 +4,7 @@
     check_coverage.py LAYOUT.json OUT_DIR [--ignore WORD ...]
 
 Counts every word of the chapter's lines in LAYOUT.json (from pdf_layout.py;
-page furniture left out) and every word in the entries a converter wrote to
+page furniture left out), and of its filled-in forms (`sheets`) and every word in the entries a converter wrote to
 OUT_DIR (each <slug>.json's name and content, and a trapping's printed
 fields: its price, damage, group and so on), plus the strings its
 `_report.json` lists under `left_out` (art credits, captions, anything left out
@@ -81,6 +81,13 @@ def main(argv=None):
         for w in words(l['text']):
             page[w] += 1
             where.setdefault(w, f'p{l["page"]}: {l["text"]}')
+    for sh in doc.get('sheets', []):          # filled-in forms (character sheets): every word of them
+        for x in sh['words']:
+            if x.get('furniture'):
+                continue
+            for w in words(x['text']):
+                page[w] += 1
+                where.setdefault(w, f'p{sh["page"]} (sheet): {x["text"]}')
 
     got = collections.Counter()
     # A converter says which of its entries' fields hold words printed on the page (a trait's
@@ -98,6 +105,8 @@ def main(argv=None):
             for s in data.get('left_out', []):
                 got.update(words(s if isinstance(s, str) else s.get('text', '')))
             for d in data.get('dehyphenated', []):     # printed split over two lines, joined in the entry
+                got.update(words(d['from']))
+            for d in data.get('spaced_joined', []):    # figures printed spaced apart ("[ 2 5 8 ]"), read as one
                 got.update(words(d['from']))
             for d in data.get('words_split', []):      # printed run together with no space, split in the entry
                 print(f'credited: {d["word"]!r} ({d["entry"]}), split into {d["into"]}: {d["why"]} (words_split)')

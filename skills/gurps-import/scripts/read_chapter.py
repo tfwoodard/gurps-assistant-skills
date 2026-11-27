@@ -25,7 +25,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 LISTS = {'icon_fonts': '--icon-fonts', 'icon_text': '--icon-text', 'aside_fonts': '--aside-fonts',
          'replace_chars': '--replace-chars', 'margin_lines': '--margin-lines', 'not_boxes': '--not-boxes',
-         'usual_gutters': '--usual-gutters', 'set_gutters': '--set-gutters', 'band_pages': '--band-pages'}
+         'usual_gutters': '--usual-gutters', 'set_gutters': '--set-gutters', 'band_pages': '--band-pages', 'sheet_pages': '--sheet-pages'}
 FLAGS = {'boxes': '--boxes', 'icons_alone': '--icons-alone'}
 
 

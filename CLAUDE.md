@@ -150,8 +150,9 @@ reader and writer (`gdf.py`, run against every data file on this computer) and
 converter (`convert_traits.py`: traits, skills, spells, templates and
 meta-traits), which reads and checks the tables set in a trait's text, and with
 `equipment_tables.py` the weapon, armor and shield tables, and with
-`creatures.py` creatures' stat blocks, and with `trait_lists.py` a book's
-summary lists of its traits; linking entries to their definitions
+`creatures.py` creatures' stat blocks, with `trait_lists.py` a book's
+summary lists of its traits, and with `character_sheets.py` filled-in character
+sheets; linking entries to their definitions
 (`link_gca.py`, with the links file in the source's plans).
 
 Not built: converters for rules prose (beyond what the trait converter makes of
