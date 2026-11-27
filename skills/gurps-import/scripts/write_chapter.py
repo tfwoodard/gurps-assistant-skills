@@ -36,6 +36,9 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+# The scripts it runs print the book's own characters (a dagger, a dash): ask them for UTF-8, which
+# is what it reads, whatever the console's code page (Windows gives a child cp1252 otherwise).
+CHILD_ENV = dict(os.environ, PYTHONIOENCODING='utf-8')
 sys.path.insert(0, HERE)
 from link_gca import with_gca  # noqa: E402
 from render_entry import render  # noqa: E402
@@ -84,7 +87,7 @@ def main(argv=None):
     if report.get('errors'):
         sys.exit(f'the converter reported {len(report["errors"])} errors; nothing written. First: {report["errors"][0]}')
     cov = subprocess.run([sys.executable, os.path.join(HERE, 'check_coverage.py'), a.layout, a.out],
-                         capture_output=True, text=True, encoding='utf-8')
+                         capture_output=True, text=True, encoding='utf-8', env=CHILD_ENV)
     if cov.returncode != 0:
         missing = [l for l in cov.stdout.splitlines() if l.startswith('missing')]
         glyphs = [l for l in cov.stdout.splitlines() if l.startswith('unmapped glyph')]
@@ -168,7 +171,7 @@ def main(argv=None):
                    '--log-notes', a.notes, '--log', log_in]
             if os.path.exists(index_path):
                 cmd += ['--index', index_path]
-            r = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
+            r = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', env=CHILD_ENV)
             if r.returncode != 0:
                 sys.exit(f'merge_import.py ({cat}): {r.stderr.strip() or r.stdout.strip()}; nothing written')
             have = {x['slug'] for x in load(os.path.join(work, '_index.json'))}
